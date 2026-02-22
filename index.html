@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Disaster Rescue Command Center</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<div class="header">
+    AI DISASTER RESCUE COMMAND CENTER
+    <div class="status">● LIVE SYSTEM ACTIVE</div>
+</div>
+
+<div class="container">
+
+    <!-- LEFT SIDEBAR -->
+    <div class="sidebar-left">
+
+        <h3>System Overview</h3>
+
+        <div class="stat-box">
+            Total Population
+            <span id="totalPop">0</span>
+        </div>
+
+        <div class="stat-box">
+            Total Critical Cases
+            <span id="totalCritical">0</span>
+        </div>
+
+        <hr>
+
+        <h3>AI Rescue Intelligence</h3>
+
+        <div class="ai-box">
+            <strong>Highest Priority Zone</strong>
+            <p id="aiTopZone">Analyzing...</p>
+        </div>
+
+        <div class="ai-box">
+            <strong>Top 5 Critical Zones</strong>
+            <ul id="aiTopList"></ul>
+        </div>
+
+        <div class="ai-box">
+            <strong>AI Recommendation</strong>
+            <p id="aiAction">Calculating...</p>
+        </div>
+
+    </div>
+
+    <!-- MAP -->
+    <div id="map"></div>
+
+    <!-- RIGHT PRIORITY PANEL -->
+    <div class="sidebar-right">
+
+        <h3>Manual Priority Control</h3>
+        <ul id="priorityList"></ul>
+
+    </div>
+
+</div>
+
+<!-- FLOATING ZONE PANEL -->
+<div id="zonePanel">
+    <button id="closePanelBtn">✖</button>
+    <h3 id="zoneName"></h3>
+
+    <p><strong>Population:</strong> <span id="zonePopulation"></span></p>
+    <p><strong>Critical:</strong> <span id="zoneCritical"></span></p>
+    <p><strong>Danger Score:</strong> <span id="zoneScore"></span></p>
+    <p><strong>Status:</strong> <span id="zoneStatus"></span></p>
+
+    <button id="rescueDoneBtn">✔ Rescue Completed</button>
+    <button id="increasePriorityBtn">⬆ Prioritise</button>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="script.js"></script>
+
+</body>
+</html>
