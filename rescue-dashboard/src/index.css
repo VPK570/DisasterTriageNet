@@ -1,0 +1,63 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+/* Keep your existing .leaflet-container and #root styles below this */
+
+/* 1. MUST BE AT THE TOP: Leaflet Map Styles */
+@import "leaflet/dist/leaflet.css";
+
+/* 2. Tailwind Directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 3. Global Reset & Layout Fixes */
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  color-scheme: dark;
+}
+
+#root, body, html {
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+  background-color: #020617; /* Matches slate-950 */
+  overflow: hidden; /* Prevents double scrollbars */
+}
+
+/* 4. Map & Component Specific Overrides */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+/* Custom Scrollbar for the Priority List */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Ensure Popup text is readable in dark mode */
+.leaflet-popup-content-wrapper {
+  background: #1e293b !important;
+  color: #f1f5f9 !important;
+  border: 1px solid #334155;
+}
+
+.leaflet-popup-tip {
+  background: #1e293b !important;
+}
