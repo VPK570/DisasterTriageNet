@@ -8,9 +8,26 @@ from math import radians, cos, sin, asin, sqrt
 import random
 import os
 
+from auth.register import register_bp
+from auth.login import login_bp
+from auth.profile import profile_bp
+from routes.victim_routes import victim_bp
+from routes.responder_routes import responder_bp
+from routes.admin_routes import admin_bp
+
 app = Flask(__name__)
 
 CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}})
+
+# Register Auth Blueprints
+app.register_blueprint(register_bp, url_prefix='/api/auth')
+app.register_blueprint(login_bp, url_prefix='/api/auth')
+app.register_blueprint(profile_bp, url_prefix='/api/auth')
+
+# Register Feature Blueprints
+app.register_blueprint(victim_bp)
+app.register_blueprint(responder_bp)
+app.register_blueprint(admin_bp)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'triage.db')
 

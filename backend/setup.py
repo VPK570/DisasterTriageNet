@@ -54,6 +54,18 @@ def init_db():
         )
     ''')
 
+    # 4. Users Table: Stores registered users (victims, responders, admin)
+    cursor.execute('''
+        CREATE TABLE users (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            email TEXT UNIQUE,
+            password_hash TEXT,
+            role TEXT,
+            created_at TEXT
+        )
+    ''')
+
     # Seed Data: Real Chennai Hospitals
     hospitals = [
         ("Rajiv Gandhi Govt General Hospital", 13.0818, 80.2755, 500, 150, "General Emergency"),
