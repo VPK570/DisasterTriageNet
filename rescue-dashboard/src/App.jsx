@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import { AlertTriangle, Activity, MapPin, Truck, Hospital } from 'lucide-react';
@@ -10,7 +10,7 @@ import 'leaflet/dist/leaflet.css';
 // --- CONFIGURATION & ICONS ---
 const API_BASE_URL = 'http://localhost:5001/api';
 
-const severityColors = { 
+const severityColors = {
   0: '#22c55e', // Low - Green
   1: '#eab308', // Moderate - Yellow
   2: '#3b82f6', // High - Blue
@@ -25,9 +25,9 @@ const createIcon = (color) => L.divIcon({
 });
 
 const hospitalIcon = new L.Icon({
-    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
 });
 
 export default function App() {
@@ -35,6 +35,28 @@ export default function App() {
   const [clusters, setClusters] = useState([]);
   const [hospitals, setHospitals] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [muted, setMuted] = useState(false);
+  const prevVictimIdsRef = useRef(new Set());
+
+  const playAlertTone = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [880, 660].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        osc.type = "sine";
+        gain.gain.setValueAtTime(0.4, ctx.currentTime + i * 0.25);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.25 + 0.2);
+        osc.start(ctx.currentTime + i * 0.25);
+        osc.stop(ctx.currentTime + i * 0.25 + 0.25);
+      });
+    } catch (err) {
+      console.warn("Audio alert failed:", err);
+    }
+  };
 
   // --- DATA FETCHING ---
   useEffect(() => {
@@ -48,11 +70,19 @@ export default function App() {
         ]);
 
         const vData = await vRes.json();
-        setVictims(vData.map(v => ({ ...v, severity: v.triage_level })));
+        const mappedVictims = vData.map(v => ({ ...v, severity: v.triage_level }));
+
+        const newCritical = mappedVictims.filter(
+          v => v.triage_level === 3 && !prevVictimIdsRef.current.has(v.id)
+        );
+        if (!muted && newCritical.length > 0) playAlertTone();
+        prevVictimIdsRef.current = new Set(mappedVictims.map(v => v.id));
+
+        setVictims(mappedVictims);
 
         if (cRes.ok) setClusters(await cRes.json());
         if (hRes.ok) setHospitals(await hRes.json());
-        
+
         setLoading(false);
       } catch (err) {
         console.error("Dashboard Sync Error:", err);
@@ -91,9 +121,17 @@ export default function App() {
         <h1 className="text-xl font-bold tracking-wider text-slate-100 uppercase">Chennai AI Triage Command</h1>
         <div className="ml-auto flex gap-4">
           <span className="flex items-center text-sm bg-slate-800 px-3 py-1 rounded-full border border-green-900/50">
-            <Activity size={16} className="mr-2 text-green-400 animate-pulse"/> 
+            <Activity size={16} className="mr-2 text-green-400 animate-pulse" />
             ML ENGINE ACTIVE
           </span>
+
+          <button
+            onClick={() => setMuted(!muted)}
+            className={`p-2 rounded-full transition-colors ${muted ? 'bg-red-900/40 text-red-400' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+            title={muted ? "Unmute Alerts" : "Mute Alerts"}
+          >
+            {muted ? <Activity size={18} className="rotate-45" /> : <Activity size={18} />}
+          </button>
         </div>
       </header>
 
@@ -119,7 +157,7 @@ export default function App() {
             <div className="space-y-2 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
               {mockAmbulances.map(amb => (
                 <div key={amb.id} className="flex items-center justify-between bg-slate-800/50 p-3 rounded border border-slate-700/50">
-                  <span className="text-xs flex items-center"><Truck size={14} className="mr-2 text-blue-400"/> {amb.id}</span>
+                  <span className="text-xs flex items-center"><Truck size={14} className="mr-2 text-blue-400" /> {amb.id}</span>
                   <span className={`text-[10px] px-2 py-0.5 rounded uppercase font-bold ${amb.status === 'available' ? 'text-green-400' : 'text-orange-400'}`}>
                     {amb.status}
                   </span>
@@ -149,16 +187,16 @@ export default function App() {
 
               {/* DBSCAN Dynamic Clusters */}
               {clusters.map((c) => (
-                <Circle 
-                  key={`cluster-${c.id}`} 
-                  center={[c.lat, c.lng]} 
+                <Circle
+                  key={`cluster-${c.id}`}
+                  center={[c.lat, c.lng]}
                   radius={c.radius || 200} // Fallback to 200m if radius is NaN
-                  pathOptions={{ 
-                    color: c.avg_severity > 2 ? '#ef4444' : '#f59e0b', 
-                    fillOpacity: 0.15, 
-                    dashArray: '5, 10', 
-                    weight: 1 
-                  }} 
+                  pathOptions={{
+                    color: c.avg_severity > 2 ? '#ef4444' : '#f59e0b',
+                    fillOpacity: 0.15,
+                    dashArray: '5, 10',
+                    weight: 1
+                  }}
                 >
                   <Tooltip direction="top" opacity={0.9}>
                     <div className="text-xs font-bold">ZONE {c.id}: {c.count} Victims</div>
@@ -185,12 +223,11 @@ export default function App() {
                           <p className="font-bold text-green-400">{v.spo2}%</p>
                         </div>
                       </div>
-                      <button 
-                        onClick={() => handleAssign(v.id)} 
+                      <button
+                        onClick={() => handleAssign(v.id)}
                         disabled={v.status === 'assigned'}
-                        className={`w-full py-2 rounded text-[10px] font-bold transition-all ${
-                          v.status === 'assigned' ? 'bg-slate-800 text-slate-500' : 'bg-blue-600 hover:bg-blue-500 text-white'
-                        }`}
+                        className={`w-full py-2 rounded text-[10px] font-bold transition-all ${v.status === 'assigned' ? 'bg-slate-800 text-slate-500' : 'bg-blue-600 hover:bg-blue-500 text-white'
+                          }`}
                       >
                         {v.status === 'assigned' ? '✓ DISPATCHED' : 'DISPATCH AMBULANCE'}
                       </button>
@@ -224,7 +261,7 @@ export default function App() {
                     <Pie data={severityData} dataKey="value" cx="50%" cy="50%" innerRadius={35} outerRadius={55} stroke="none" paddingAngle={5}>
                       {severityData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                     </Pie>
-                    <RechartsTooltip contentStyle={{backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px'}} />
+                    <RechartsTooltip contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -237,7 +274,7 @@ export default function App() {
                     <XAxis dataKey="name" stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
                     <YAxis stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
                     <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={30} />
-                    <RechartsTooltip cursor={{fill: 'transparent'}} contentStyle={{backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px'}} />
+                    <RechartsTooltip cursor={{ fill: 'transparent' }} contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -253,14 +290,12 @@ export default function App() {
               .filter(v => v.status !== 'assigned')
               .sort((a, b) => b.severity - a.severity)
               .map(v => (
-                <div key={v.id} className={`p-3 rounded-lg border bg-slate-800/80 transition-all hover:bg-slate-800 ${
-                  v.severity === 3 ? 'border-red-500/40 shadow-[0_0_10px_rgba(239,68,68,0.1)]' : 'border-slate-700'
-                }`}>
+                <div key={v.id} className={`p-3 rounded-lg border bg-slate-800/80 transition-all hover:bg-slate-800 ${v.severity === 3 ? 'border-red-500/40 shadow-[0_0_10px_rgba(239,68,68,0.1)]' : 'border-slate-700'
+                  }`}>
                   <div className="flex justify-between items-start mb-2">
                     <span className="font-bold text-slate-100 text-sm">{v.id}</span>
-                    <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
-                      v.severity === 3 ? 'bg-red-500 text-white' : 'bg-slate-700 text-slate-300'
-                    }`}>
+                    <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${v.severity === 3 ? 'bg-red-500 text-white' : 'bg-slate-700 text-slate-300'
+                      }`}>
                       {v.severity === 3 ? 'Critical' : v.severity === 2 ? 'High' : 'Stable'}
                     </span>
                   </div>
@@ -270,14 +305,14 @@ export default function App() {
                     <p>HR: <span className="text-slate-200">{v.heart_rate}</span></p>
                     <p>Temp: <span className="text-slate-200">{v.temperature}°C</span></p>
                   </div>
-                  <button 
+                  <button
                     onClick={() => handleAssign(v.id)}
                     className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded text-[10px] font-bold flex items-center justify-center transition-colors"
                   >
-                    <MapPin size={12} className="mr-2"/> DISPATCH NOW
+                    <MapPin size={12} className="mr-2" /> DISPATCH NOW
                   </button>
                 </div>
-            ))}
+              ))}
             {victims.filter(v => v.status !== 'assigned').length === 0 && (
               <div className="text-center py-10 text-slate-600 text-xs italic">
                 No pending emergencies
