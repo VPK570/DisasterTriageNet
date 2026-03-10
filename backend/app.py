@@ -70,6 +70,14 @@ def match_hospital(victim_lat, victim_lng):
         print(f"🏥 Hospital Match Error: {e}")
         return None
 
+def run_clustering(incident_id='INC-001'):
+    """Run DBSCAN clustering in background and notify dashboard."""
+    try:
+        calculate_hotspots(incident_id)
+        socketio.emit('clusters_updated', {'incident_id': incident_id})
+    except Exception as e:
+        print(f"📍 Background Clustering Error for {incident_id}: {e}")
+
 # --- API ROUTES ---
 
 @app.route('/api/ingest', methods=['POST'])
@@ -122,13 +130,9 @@ def ingest_data():
     finally:
         if conn: conn.close()
 
-    # 4. Trigger Clustering (Separated to prevent Ingest Hangs)
-    try:
-        # If your simulator is very fast, you can comment this out 
-        # and create a separate route for clustering.
-        calculate_hotspots() 
-    except Exception as e:
-        print(f"📍 Clustering Warning: {e} (Continuing simulation regardless)")
+    # 4. Trigger Clustering (Running in background to prevent timeouts)
+    import threading
+    threading.Thread(target=run_clustering, args=(incident_id,), daemon=True).start()
 
     print(f"✅ Processed {victim_id} | Triage: {severity}")
     

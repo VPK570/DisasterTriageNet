@@ -174,6 +174,12 @@ export default function App() {
       }
     });
 
+    socket.on("clusters_updated", (data) => {
+      if (data.incident_id === activeIncident) {
+        fetchAll();
+      }
+    });
+
     return () => socket.disconnect();
   }, [muted, activeIncident]);
 

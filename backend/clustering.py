@@ -1,6 +1,7 @@
 import sqlite3
 import numpy as np
 from sklearn.cluster import DBSCAN
+from joblib import parallel_backend
 from math import radians, cos, sin, asin, sqrt
 
 def get_distance(lat1, lon1, lat2, lon2):
@@ -10,12 +11,12 @@ def get_distance(lat1, lon1, lat2, lon2):
     a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
     return R * 2 * asin(sqrt(a)) * 1000 # Return in meters
 
-def calculate_hotspots():
+def calculate_hotspots(incident_id='INC-001'):
     conn = sqlite3.connect('triage.db')
     cursor = conn.cursor()
     
-    # Only cluster victims who aren't assigned yet
-    cursor.execute("SELECT lat, lng, triage_level FROM victims WHERE status = 'unassigned'")
+    # Only cluster victims who aren't assigned yet for this incident
+    cursor.execute("SELECT lat, lng, triage_level FROM victims WHERE status = 'unassigned' AND incident_id = ?", (incident_id,))
     data = cursor.fetchall()
     
     if len(data) < 3: return # Need a minimum crowd to form a cluster
@@ -25,11 +26,12 @@ def calculate_hotspots():
 
     # DBSCAN: eps is the max distance between two points (approx 500m here)
     # min_samples is the minimum victims to qualify as a "Zone"
-    db = DBSCAN(eps=0.005, min_samples=3).fit(coords)
+    with parallel_backend('threading'):
+        db = DBSCAN(eps=0.005, min_samples=3).fit(coords)
     labels = db.labels_
 
-    # Clear old clusters
-    cursor.execute("DELETE FROM clusters")
+    # Clear old clusters for THIS incident only
+    cursor.execute("DELETE FROM clusters WHERE incident_id = ?", (incident_id,))
 
     for cluster_id in set(labels):
         if cluster_id == -1: continue # Ignore noise/outliers
@@ -54,9 +56,9 @@ def calculate_hotspots():
         avg_severity = np.mean(cluster_severities)
 
         cursor.execute('''
-            INSERT INTO clusters (id, lat, lng, count, avg_severity, radius)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (int(cluster_id), center_lat, center_lng, len(cluster_indices), avg_severity, dynamic_radius))
+            INSERT INTO clusters (id, lat, lng, count, avg_severity, radius, incident_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (int(cluster_id), center_lat, center_lng, len(cluster_indices), avg_severity, dynamic_radius, incident_id))
 
     conn.commit()
     conn.close()
