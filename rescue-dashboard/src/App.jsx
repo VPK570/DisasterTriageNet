@@ -210,9 +210,35 @@ export default function App() {
             </div>
           </section>
 
-          <section className="flex-1 overflow-hidden">
+          <section className="flex-1 overflow-hidden flex flex-col">
+            <h2 className="text-xs uppercase text-slate-500 font-semibold mb-3 tracking-widest">Hospital Capacity</h2>
+            <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar">
+              {hospitals.map(h => (
+                <div key={h.id} className="bg-slate-800/40 p-3 rounded border border-slate-700/50">
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="text-[10px] font-bold text-slate-300 truncate w-32">{h.name}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-black ${h.eta_minutes < 15 ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
+                      {h.eta_minutes ? `ETA ${h.eta_minutes}m` : '---'}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${h.available_beds / h.total_beds < 0.2 ? 'bg-red-500' : 'bg-blue-500'}`}
+                      style={{ width: `${(h.available_beds / h.total_beds) * 100}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between mt-1 text-[9px] text-slate-500">
+                    <span>{h.available_beds} beds free</span>
+                    <span>{Math.round((h.available_beds / h.total_beds) * 100)}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="overflow-hidden">
             <h2 className="text-xs uppercase text-slate-500 font-semibold mb-3 tracking-widest">Responders</h2>
-            <div className="space-y-2 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
+            <div className="space-y-2 overflow-y-auto max-h-[150px] pr-2 custom-scrollbar">
               {mockAmbulances.map(amb => (
                 <div key={amb.id} className="flex items-center justify-between bg-slate-800/50 p-3 rounded border border-slate-700/50">
                   <span className="text-xs flex items-center"><Truck size={14} className="mr-2 text-blue-400" /> {amb.id}</span>

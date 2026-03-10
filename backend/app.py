@@ -189,9 +189,27 @@ def get_clusters():
 def get_hospitals():
     try:
         conn = get_db_connection()
-        hospitals = conn.execute('SELECT * FROM hospitals').fetchall()
+        hospitals = [dict(row) for row in conn.execute('SELECT * FROM hospitals').fetchall()]
+        clusters = [dict(row) for row in conn.execute('SELECT lat, lng FROM clusters').fetchall()]
         conn.close()
-        return jsonify([dict(row) for row in hospitals])
+
+        result = []
+        for h in hospitals:
+            # ETA to nearest active cluster (or null if no clusters)
+            if clusters:
+                min_dist = min(
+                    get_distance(h['lat'], h['lng'], c['lat'], c['lng'])
+                    for c in clusters
+                )
+                # 40 km/h urban speed → minutes
+                h['eta_minutes'] = round((min_dist / 40) * 60, 1)
+                h['distance_km'] = round(min_dist, 2)
+            else:
+                h['eta_minutes'] = None
+                h['distance_km'] = None
+            result.append(h)
+
+        return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
