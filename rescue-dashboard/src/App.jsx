@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { io } from "socket.io-client";
 import { MapContainer, TileLayer, Marker, Popup, Circle, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import { AlertTriangle, Activity, MapPin, Truck, Hospital } from 'lucide-react';
@@ -58,40 +59,55 @@ export default function App() {
     }
   };
 
-  // --- DATA FETCHING ---
+  const fetchAll = async () => {
+    try {
+      const [vRes, cRes, hRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/victims`),
+        fetch(`${API_BASE_URL}/clusters`),
+        fetch(`${API_BASE_URL}/hospitals`)
+      ]);
+
+      const vData = await vRes.json();
+      const mappedVictims = vData.map(v => ({ ...v, severity: v.triage_level }));
+
+      const newCritical = mappedVictims.filter(
+        v => v.triage_level === 3 && !prevVictimIdsRef.current.has(v.id)
+      );
+      if (!muted && newCritical.length > 0) playAlertTone();
+      prevVictimIdsRef.current = new Set(mappedVictims.map(v => v.id));
+
+      setVictims(mappedVictims);
+
+      if (cRes.ok) setClusters(await cRes.json());
+      if (hRes.ok) setHospitals(await hRes.json());
+      setLoading(false);
+    } catch (err) {
+      console.error("Dashboard Sync Error:", err);
+    }
+  };
+
+  // Feature 2: WebSocket Real-Time Push
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Fetch everything in parallel
-        const [vRes, cRes, hRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/victims`),
-          fetch(`${API_BASE_URL}/clusters`),
-          fetch(`${API_BASE_URL}/hospitals`)
-        ]);
+    fetchAll(); // Initial load
 
-        const vData = await vRes.json();
-        const mappedVictims = vData.map(v => ({ ...v, severity: v.triage_level }));
+    const socket = io("http://localhost:5001");
 
-        const newCritical = mappedVictims.filter(
-          v => v.triage_level === 3 && !prevVictimIdsRef.current.has(v.id)
-        );
-        if (!muted && newCritical.length > 0) playAlertTone();
-        prevVictimIdsRef.current = new Set(mappedVictims.map(v => v.id));
+    socket.on("victim_ingested", (newVictim) => {
+      fetchAll();
 
-        setVictims(mappedVictims);
-
-        if (cRes.ok) setClusters(await cRes.json());
-        if (hRes.ok) setHospitals(await hRes.json());
-
-        setLoading(false);
-      } catch (err) {
-        console.error("Dashboard Sync Error:", err);
+      // Feature 1: Alert hooks
+      if (newVictim.triage_level === 3 && !muted) {
+        playAlertTone();
       }
-    };
+    });
 
-    fetchData();
-    const interval = setInterval(fetchData, 5001); // Poll every 5 seconds
-    return () => clearInterval(interval);
+    return () => socket.disconnect();
+  }, [muted]);
+
+  // Fallback 30-second poll
+  useEffect(() => {
+    const fallback = setInterval(fetchAll, 30000);
+    return () => clearInterval(fallback);
   }, []);
 
   const handleAssign = async (victimId) => {

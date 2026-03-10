@@ -1,4 +1,7 @@
+import eventlet
+eventlet.monkey_patch()
 from flask import Flask, jsonify, request
+from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import sqlite3
 from datetime import datetime
@@ -16,6 +19,7 @@ from routes.responder_routes import responder_bp
 from routes.admin_routes import admin_bp
 
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}})
 
@@ -123,6 +127,17 @@ def ingest_data():
         print(f"📍 Clustering Warning: {e} (Continuing simulation regardless)")
 
     print(f"✅ Processed {victim_id} | Triage: {severity}")
+    
+    # Feature 2: Emit to all connected dashboard clients
+    socketio.emit('victim_ingested', {
+        'id': victim_id,
+        'triage_level': severity,
+        'lat': data['lat'],
+        'lng': data['lng'],
+        'hospital_assigned': hosp_name,
+        'timestamp': datetime.now().isoformat()
+    })
+
     return jsonify({
         "status": "success", 
         "predicted_severity": severity,
@@ -163,4 +178,4 @@ def get_hospitals():
 
 if __name__ == '__main__':
     print("📡 Chennai AI Triage API live at http://127.0.0.1:5001")
-    app.run(debug=True, port=5001)
+    socketio.run(app, debug=True, port=5001)
