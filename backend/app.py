@@ -10,6 +10,9 @@ from clustering import calculate_hotspots
 from math import radians, cos, sin, asin, sqrt
 import random
 import os
+import qrcode
+import io
+import base64
 
 from auth.register import register_bp
 from auth.login import login_bp
@@ -143,6 +146,22 @@ def ingest_data():
         "predicted_severity": severity,
         "assigned_to": hosp_name
     }), 201
+
+@app.route('/api/victims/<victim_id>/qr', methods=['GET'])
+def get_victim_qr(victim_id):
+    # URL that opens the victim's triage card on mobile
+    card_url = f"http://localhost:5173/victim/{victim_id}"
+
+    qr = qrcode.QRCode(box_size=8, border=2)
+    qr.add_data(card_url)
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="#f1f5f9", back_color="#0f172a")  # matches dark theme
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode()
+
+    return jsonify({'qr_base64': encoded, 'url': card_url, 'victim_id': victim_id})
 
 # --- GETTERS ---
 

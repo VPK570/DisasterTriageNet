@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { io } from "socket.io-client";
 import { MapContainer, TileLayer, Marker, Popup, Circle, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
-import { AlertTriangle, Activity, MapPin, Truck, Hospital } from 'lucide-react';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
-import { HeatmapLayer } from 'react-leaflet-heatmap-layer-v3';
+import VictimCard from './components/VictimCard';
+import 'leaflet/dist/leaflet.css';
+import { AlertTriangle, Activity, MapPin, Truck, Hospital, QrCode } from 'lucide-react';
 import { mockAmbulances } from './data/mockData';
 import 'leaflet/dist/leaflet.css';
 
@@ -37,6 +37,7 @@ export default function App() {
   const [hospitals, setHospitals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [muted, setMuted] = useState(false);
+  const [qrData, setQrData] = useState({});
   const prevVictimIdsRef = useRef(new Set());
 
   const playAlertTone = () => {
@@ -138,6 +139,30 @@ export default function App() {
     }
   };
 
+  const fetchQr = async (victimId) => {
+    if (qrData[victimId]) {
+      setQrData(d => {
+        const next = { ...d };
+        delete next[victimId];
+        return next;
+      });
+      return;
+    }
+    try {
+      const res = await fetch(`http://localhost:5001/api/victims/${victimId}/qr`);
+      const data = await res.json();
+      setQrData(d => ({ ...d, [victimId]: data.qr_base64 }));
+    } catch (err) {
+      console.error("QR Fetch Error:", err);
+    }
+  };
+
+  // --- ROUTING ---
+  const path = window.location.pathname;
+  const victimMatch = path.match(/^\/victim\/(V-\d+)$/);
+  if (victimMatch) {
+    return <VictimCard victimId={victimMatch[1]} />;
+  }
   // --- CHART DATA PREP ---
   const severityData = [
     { name: 'Low', value: victims.filter(v => v.severity === 0).length, color: severityColors[0] },
@@ -244,8 +269,24 @@ export default function App() {
                     <div className="p-2 min-w-[200px] bg-slate-900 text-slate-100 rounded">
                       <div className="flex justify-between items-center border-b border-slate-700 pb-2 mb-2">
                         <span className="font-bold">{v.id}</span>
-                        <span className="text-[10px] px-2 py-0.5 bg-slate-800 rounded">AGE: {v.age}</span>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => fetchQr(v.id)}
+                            className="p-1 bg-slate-800 rounded hover:bg-slate-700 text-slate-300"
+                            title="Generate QR"
+                          >
+                            <QrCode size={14} />
+                          </button>
+                          <span className="text-[10px] px-2 py-0.5 bg-slate-800 rounded">AGE: {v.age}</span>
+                        </div>
                       </div>
+
+                      {qrData[v.id] && (
+                        <div className="bg-white p-2 mb-3 rounded flex flex-col items-center">
+                          <img src={`data:image/png;base64,${qrData[v.id]}`} alt="Victim QR" className="w-24 h-24" />
+                          <p className="text-[8px] text-slate-500 mt-1 uppercase font-bold">Field Access Code</p>
+                        </div>
+                      )}
                       <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
                         <div className="bg-slate-800 p-2 rounded text-center">
                           <p className="text-slate-400 text-[10px] uppercase">Heart Rate</p>
@@ -356,4 +397,4 @@ export default function App() {
       </div>
     </div>
   );
-}
+}}
