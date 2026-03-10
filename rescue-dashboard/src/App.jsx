@@ -95,9 +95,19 @@ export default function App() {
     socket.on("victim_ingested", (newVictim) => {
       fetchAll();
 
-      // Feature 1: Alert hooks
-      if (newVictim.triage_level === 3 && !muted) {
-        playAlertTone();
+      // Feature 1 & 3: Alert hooks
+      if (newVictim.triage_level === 3) {
+        if (!muted) playAlertTone();
+
+        // Feature 3: Push Notification
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification("🚨 CRITICAL VICTIM ARRIVING", {
+            body: `Victim ${newVictim.id} — assigned to ${newVictim.hospital_assigned || "unassigned"}`,
+            icon: "/vite.svg",
+            tag: newVictim.id,
+            requireInteraction: true,
+          });
+        }
       }
     });
 
@@ -108,6 +118,13 @@ export default function App() {
   useEffect(() => {
     const fallback = setInterval(fetchAll, 30000);
     return () => clearInterval(fallback);
+  }, []);
+
+  // Feature 3: On mount
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
   }, []);
 
   const handleAssign = async (victimId) => {
