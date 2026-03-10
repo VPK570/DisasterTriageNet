@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from "socket.io-client";
-import { MapContainer, TileLayer, Marker, Popup, Circle, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, Tooltip, Polyline, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, ScatterChart, Scatter, ZAxis } from 'recharts';
 import { HeatmapLayer } from 'react-leaflet-heatmap-layer-v3';
@@ -97,6 +97,9 @@ export default function App() {
   const [qrData, setQrData] = useState({});
   const [incidents, setIncidents] = useState([]);
   const [activeIncident, setActiveIncident] = useState("INC-001");
+  const [activeRoute, setActiveRoute] = useState(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [selectedAmbulance, setSelectedAmbulance] = useState(null);
   const prevVictimIdsRef = useRef(new Set());
 
   const playAlertTone = () => {
@@ -205,6 +208,39 @@ export default function App() {
     } catch (error) {
       console.error("Assignment failed:", error);
     }
+  };
+
+  const planRoute = async (ambulance) => {
+    setRouteLoading(true);
+    setSelectedAmbulance(ambulance.id);
+    try {
+      const res = await fetch("http://localhost:5001/api/responder/route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ambulance_id: ambulance.id,
+          lat: ambulance.lat,
+          lng: ambulance.lng,
+          radius_km: 15,
+          incident_id: activeIncident,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setActiveRoute(data.route);
+      } else {
+        alert(data.error || "Could not plan route");
+      }
+    } catch (error) {
+      console.error("Route planning failed:", error);
+    } finally {
+      setRouteLoading(false);
+    }
+  };
+
+  const clearRoute = () => {
+    setActiveRoute(null);
+    setSelectedAmbulance(null);
   };
 
   const fetchQr = async (victimId) => {
@@ -322,11 +358,33 @@ export default function App() {
             <h2 className="text-xs uppercase text-slate-500 font-semibold mb-3 tracking-widest">Responders</h2>
             <div className="space-y-2 overflow-y-auto max-h-[150px] pr-2 custom-scrollbar">
               {mockAmbulances.map(amb => (
-                <div key={amb.id} className="flex items-center justify-between bg-slate-800/50 p-3 rounded border border-slate-700/50">
-                  <span className="text-xs flex items-center"><Truck size={14} className="mr-2 text-blue-400" /> {amb.id}</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded uppercase font-bold ${amb.status === 'available' ? 'text-green-400' : 'text-orange-400'}`}>
-                    {amb.status}
-                  </span>
+                <div key={amb.id} className="bg-slate-800/50 p-3 rounded border border-slate-700/50">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs flex items-center"><Truck size={14} className="mr-2 text-blue-400" /> {amb.id}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded uppercase font-bold ${amb.status === 'available' ? 'text-green-400' : 'text-orange-400'}`}>
+                      {amb.status}
+                    </span>
+                  </div>
+                  {amb.status === 'available' && (
+                    <button
+                      onClick={() => selectedAmbulance === amb.id ? clearRoute() : planRoute(amb)}
+                      disabled={routeLoading && selectedAmbulance === amb.id}
+                      className={`w-full mt-2 py-1.5 rounded-lg text-xs font-semibold transition-colors ${selectedAmbulance === amb.id
+                        ? "bg-orange-500/20 border border-orange-500/50 text-orange-400 hover:bg-orange-500/10"
+                        : "bg-slate-700 hover:bg-slate-600 text-slate-300"
+                        }`}
+                    >
+                      {selectedAmbulance === amb.id ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <MapPin size={12} /> Clear Route
+                        </span>
+                      ) : (
+                        <span className="flex items-center justify-center gap-2">
+                          {routeLoading && selectedAmbulance === amb.id ? "Calculating..." : <><Truck size={12} /> Plan Route</>}
+                        </span>
+                      )}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -339,6 +397,33 @@ export default function App() {
           <div className="flex-1 relative bg-slate-950">
             <MapContainer center={[13.0827, 80.2707]} zoom={12} className="h-full w-full">
               <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+
+              {/* Active Route Rendering */}
+              {activeRoute && (
+                <>
+                  <Polyline
+                    positions={activeRoute.map(step => [step.lat, step.lng])}
+                    pathOptions={{ color: '#fb923c', weight: 4, opacity: 0.8, dashArray: '10, 10' }}
+                  />
+                  {activeRoute.map((step, idx) => (
+                    <CircleMarker
+                      key={`step-${step.id}-${idx}`}
+                      center={[step.lat, step.lng]}
+                      radius={6}
+                      pathOptions={{
+                        fillColor: severityColors[step.triage_level],
+                        color: 'white',
+                        weight: 2,
+                        fillOpacity: 1
+                      }}
+                    >
+                      <Tooltip permanent direction="right">
+                        <span className="text-[10px] font-bold">LEG {idx + 1}: {step.id}</span>
+                      </Tooltip>
+                    </CircleMarker>
+                  ))}
+                </>
+              )}
 
               {/* Heatmap for unassigned victims */}
               {victims.length > 0 && (
@@ -507,4 +592,4 @@ export default function App() {
       </div>
     </div>
   );
-}}
+}
