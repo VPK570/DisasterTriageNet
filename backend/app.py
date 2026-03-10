@@ -99,12 +99,13 @@ def ingest_data():
         conn = get_db_connection()
         
         # INSERT Victim Data
+        incident_id = data.get('incident_id', 'INC-001')
         conn.execute('''
-            INSERT INTO victims (id, age, heart_rate, spo2, temperature, triage_level, lat, lng, timestamp, status, hospital_assigned)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO victims (id, age, heart_rate, spo2, temperature, triage_level, lat, lng, timestamp, status, hospital_assigned, incident_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             victim_id, data['age'], data['heart_rate'], data['spo2'], data['temperature'],
-            severity, data['lat'], data['lng'], datetime.now().isoformat(), 'unassigned', hosp_name
+            severity, data['lat'], data['lng'], datetime.now().isoformat(), 'unassigned', hosp_name, incident_id
         ))
         
         # UPDATE Hospital Beds
@@ -138,7 +139,8 @@ def ingest_data():
         'lat': data['lat'],
         'lng': data['lng'],
         'hospital_assigned': hosp_name,
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        'incident_id': incident_id
     })
 
     return jsonify({
@@ -146,6 +148,32 @@ def ingest_data():
         "predicted_severity": severity,
         "assigned_to": hosp_name
     }), 201
+
+@app.route('/api/incidents', methods=['GET'])
+def get_incidents():
+    try:
+        conn = get_db_connection()
+        rows = conn.execute('SELECT * FROM incidents ORDER BY created_at DESC').fetchall()
+        conn.close()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/incidents', methods=['POST'])
+def create_incident():
+    try:
+        data = request.json
+        inc_id = f"INC-{random.randint(100, 999)}"
+        conn = get_db_connection()
+        conn.execute(
+            'INSERT INTO incidents (id, name, type, lat, lng) VALUES (?, ?, ?, ?, ?)',
+            (inc_id, data['name'], data.get('type', 'general'), data.get('lat', 13.0827), data.get('lng', 80.2707))
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({'incident_id': inc_id}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/victims/<victim_id>/qr', methods=['GET'])
 def get_victim_qr(victim_id):
@@ -168,8 +196,12 @@ def get_victim_qr(victim_id):
 @app.route('/api/victims', methods=['GET'])
 def get_victims():
     try:
+        incident_id = request.args.get('incident_id')
         conn = get_db_connection()
-        victims = conn.execute('SELECT * FROM victims ORDER BY triage_level DESC, timestamp DESC').fetchall()
+        if incident_id:
+            victims = conn.execute('SELECT * FROM victims WHERE incident_id=? ORDER BY triage_level DESC, timestamp DESC', (incident_id,)).fetchall()
+        else:
+            victims = conn.execute('SELECT * FROM victims ORDER BY triage_level DESC, timestamp DESC').fetchall()
         conn.close()
         return jsonify([dict(row) for row in victims])
     except Exception as e:
@@ -178,8 +210,12 @@ def get_victims():
 @app.route('/api/clusters', methods=['GET'])
 def get_clusters():
     try:
+        incident_id = request.args.get('incident_id')
         conn = get_db_connection()
-        clusters = conn.execute('SELECT * FROM clusters').fetchall()
+        if incident_id:
+            clusters = conn.execute('SELECT * FROM clusters WHERE incident_id=?', (incident_id,)).fetchall()
+        else:
+            clusters = conn.execute('SELECT * FROM clusters').fetchall()
         conn.close()
         return jsonify([dict(row) for row in clusters])
     except Exception as e:

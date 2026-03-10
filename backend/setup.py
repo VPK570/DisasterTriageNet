@@ -12,7 +12,26 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # 1. Victims Table: Stores patient vitals and ML triage results
+    # 1. Incidents Table
+    cursor.execute('''
+        CREATE TABLE incidents (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT,
+            status TEXT DEFAULT 'active',
+            lat REAL,
+            lng REAL,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    ''')
+
+    # Seed a default incident
+    cursor.execute('''
+        INSERT INTO incidents (id, name, type, lat, lng)
+        VALUES ('INC-001', 'Chennai Flood 2026', 'flood', 13.0827, 80.2707)
+    ''')
+
+    # 2. Victims Table: Stores patient vitals and ML triage results
     cursor.execute('''
         CREATE TABLE victims (
             id TEXT PRIMARY KEY, 
@@ -25,7 +44,9 @@ def init_db():
             lng REAL, 
             timestamp TEXT, 
             status TEXT,
-            hospital_assigned TEXT
+            hospital_assigned TEXT,
+            incident_id TEXT DEFAULT 'INC-001',
+            FOREIGN KEY (incident_id) REFERENCES incidents(id)
         )
     ''')
 
@@ -37,7 +58,9 @@ def init_db():
             lng REAL,
             count INTEGER,
             avg_severity REAL,
-            radius REAL
+            radius REAL,
+            incident_id TEXT DEFAULT 'INC-001',
+            FOREIGN KEY (incident_id) REFERENCES incidents(id)
         )
     ''')
 

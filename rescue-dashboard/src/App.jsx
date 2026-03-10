@@ -38,6 +38,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [muted, setMuted] = useState(false);
   const [qrData, setQrData] = useState({});
+  const [incidents, setIncidents] = useState([]);
+  const [activeIncident, setActiveIncident] = useState("INC-001");
   const prevVictimIdsRef = useRef(new Set());
 
   const playAlertTone = () => {
@@ -62,14 +64,17 @@ export default function App() {
 
   const fetchAll = async () => {
     try {
-      const [vRes, cRes, hRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/victims`),
-        fetch(`${API_BASE_URL}/clusters`),
-        fetch(`${API_BASE_URL}/hospitals`)
+      const [vRes, cRes, hRes, iRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/victims?incident_id=${activeIncident}`),
+        fetch(`${API_BASE_URL}/clusters?incident_id=${activeIncident}`),
+        fetch(`${API_BASE_URL}/hospitals`),
+        fetch(`${API_BASE_URL}/incidents`)
       ]);
 
       const vData = await vRes.json();
       const mappedVictims = vData.map(v => ({ ...v, severity: v.triage_level }));
+
+      if (iRes.ok) setIncidents(await iRes.json());
 
       const newCritical = mappedVictims.filter(
         v => v.triage_level === 3 && !prevVictimIdsRef.current.has(v.id)
@@ -94,26 +99,26 @@ export default function App() {
     const socket = io("http://localhost:5001");
 
     socket.on("victim_ingested", (newVictim) => {
-      fetchAll();
-
-      // Feature 1 & 3: Alert hooks
-      if (newVictim.triage_level === 3) {
-        if (!muted) playAlertTone();
-
-        // Feature 3: Push Notification
-        if ("Notification" in window && Notification.permission === "granted") {
-          new Notification("🚨 CRITICAL VICTIM ARRIVING", {
-            body: `Victim ${newVictim.id} — assigned to ${newVictim.hospital_assigned || "unassigned"}`,
-            icon: "/vite.svg",
-            tag: newVictim.id,
-            requireInteraction: true,
-          });
+      if (newVictim.incident_id === activeIncident) {
+        fetchAll();
+        // Feature 1 & 3: Alert hooks
+        if (newVictim.triage_level === 3) {
+          if (!muted) playAlertTone();
+          // Feature 3: Push Notification... (omitted for brevity but normally kept)
+          if ("Notification" in window && Notification.permission === "granted") {
+            new Notification("🚨 CRITICAL VICTIM ARRIVING", {
+              body: `Victim ${newVictim.id} — assigned to ${newVictim.hospital_assigned || "unassigned"}`,
+              icon: "/vite.svg",
+              tag: newVictim.id,
+              requireInteraction: true,
+            });
+          }
         }
       }
     });
 
     return () => socket.disconnect();
-  }, [muted]);
+  }, [muted, activeIncident]);
 
   // Fallback 30-second poll
   useEffect(() => {
@@ -177,6 +182,20 @@ export default function App() {
       <header className="h-14 bg-slate-900 border-b border-slate-800 flex items-center px-6 shrink-0 shadow-md z-20">
         <AlertTriangle className="text-red-500 mr-3" size={24} />
         <h1 className="text-xl font-bold tracking-wider text-slate-100 uppercase">Chennai AI Triage Command</h1>
+
+        <div className="ml-8 border-l border-slate-700 pl-8 flex items-center gap-2">
+          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Active Episode</span>
+          <select
+            value={activeIncident}
+            onChange={(e) => setActiveIncident(e.target.value)}
+            className="bg-slate-800 border-none text-blue-400 text-xs font-bold rounded px-3 py-1 outline-none ring-1 ring-slate-700"
+          >
+            {incidents.map(inc => (
+              <option key={inc.id} value={inc.id}>{inc.name} ({inc.id})</option>
+            ))}
+          </select>
+        </div>
+
         <div className="ml-auto flex gap-4">
           <span className="flex items-center text-sm bg-slate-800 px-3 py-1 rounded-full border border-green-900/50">
             <Activity size={16} className="mr-2 text-green-400 animate-pulse" />
