@@ -8,7 +8,6 @@ import VictimCard from './components/VictimCard';
 import 'leaflet/dist/leaflet.css';
 import { AlertTriangle, Activity, MapPin, Truck, Hospital, QrCode } from 'lucide-react';
 import { mockAmbulances } from './data/mockData';
-import 'leaflet/dist/leaflet.css';
 
 // --- CONFIGURATION & ICONS ---
 const API_BASE_URL = 'http://localhost:5001/api';
@@ -156,15 +155,13 @@ export default function App() {
   useEffect(() => {
     fetchAll(); // Initial load
 
-    const socket = io("http://localhost:5001");
+    const socket = io(API_BASE_URL.replace('/api', ''));
 
     socket.on("victim_ingested", (newVictim) => {
       if (newVictim.incident_id === activeIncident) {
         fetchAll();
-        // Feature 1 & 3: Alert hooks
         if (newVictim.triage_level === 3) {
           if (!muted) playAlertTone();
-          // Feature 3: Push Notification... (omitted for brevity but normally kept)
           if ("Notification" in window && Notification.permission === "granted") {
             new Notification("🚨 CRITICAL VICTIM ARRIVING", {
               body: `Victim ${newVictim.id} — assigned to ${newVictim.hospital_assigned || "unassigned"}`,
@@ -181,6 +178,13 @@ export default function App() {
       if (data.incident_id === activeIncident) {
         fetchAll();
       }
+    });
+
+    // Immediately remove dispatched victims from the feed without a full refresh
+    socket.on("victim_assigned", ({ victim_id }) => {
+      setVictims(prev => prev.map(v =>
+        v.id === victim_id ? { ...v, status: 'assigned' } : v
+      ));
     });
 
     return () => socket.disconnect();
@@ -214,7 +218,7 @@ export default function App() {
     setRouteLoading(true);
     setSelectedAmbulance(ambulance.id);
     try {
-      const res = await fetch("http://localhost:5001/api/responder/route", {
+      const res = await fetch(`${API_BASE_URL}/responder/route`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -253,9 +257,13 @@ export default function App() {
       return;
     }
     try {
-      const res = await fetch(`http://localhost:5001/api/victims/${victimId}/qr`);
+      const res = await fetch(`${API_BASE_URL}/victims/${victimId}/qr`);
       const data = await res.json();
-      setQrData(d => ({ ...d, [victimId]: data.qr_base64 }));
+      if (data.qr_base64) {
+        setQrData(d => ({ ...d, [victimId]: data.qr_base64 }));
+      } else {
+        console.error("QR generation failed:", data.error);
+      }
     } catch (err) {
       console.error("QR Fetch Error:", err);
     }
