@@ -276,9 +276,9 @@ export default function App() {
   ];
 
   return (
-    <div className="h-screen w-full bg-slate-950 text-slate-200 flex flex-col font-sans overflow-hidden">
+    <div className="h-screen w-full bg-slate-950 text-slate-200 flex flex-col font-sans overflow-hidden bg-radial-at-tl from-slate-900 via-slate-950 to-slate-950">
       {/* HEADER */}
-      <header className="h-14 bg-slate-900 border-b border-slate-800 flex items-center px-6 shrink-0 shadow-md z-20">
+      <header className="h-16 glass-panel border-b flex items-center px-8 shrink-0 shadow-2xl z-20 sticky top-0">
         <AlertTriangle className="text-red-500 mr-3" size={24} />
         <h1 className="text-xl font-bold tracking-wider text-slate-100 uppercase">Chennai AI Triage Command</h1>
 
@@ -313,74 +313,94 @@ export default function App() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT SIDEBAR - METRICS */}
-        <aside className="w-64 bg-slate-900 border-r border-slate-800 p-4 flex flex-col gap-6 shrink-0 z-10">
+        <aside className="w-72 glass-panel border-r p-6 flex flex-col gap-8 shrink-0 z-10 overflow-y-auto custom-scrollbar">
           <section>
-            <h2 className="text-xs uppercase text-slate-500 font-semibold mb-3 tracking-widest">Live Stats</h2>
-            <div className="grid gap-3">
-              <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                <p className="text-3xl font-bold text-white">{victims.length}</p>
-                <p className="text-xs text-slate-400 uppercase">Total Victims</p>
-              </div>
-              <div className="bg-slate-800 p-4 rounded-lg border border-red-900/30">
-                <p className="text-3xl font-bold text-red-400">{victims.filter(v => v.severity === 3).length}</p>
-                <p className="text-xs text-slate-400 uppercase">Critical (Red)</p>
-              </div>
-            </div>
-          </section>
-
-          <section className="flex-1 overflow-hidden flex flex-col">
-            <h2 className="text-xs uppercase text-slate-500 font-semibold mb-3 tracking-widest">Hospital Capacity</h2>
-            <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar">
-              {hospitals.map(h => (
-                <div key={h.id} className="bg-slate-800/40 p-3 rounded border border-slate-700/50">
-                  <div className="flex justify-between items-start mb-1">
-                    <span className="text-[10px] font-bold text-slate-300 truncate w-32">{h.name}</span>
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-black ${h.eta_minutes < 15 ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
-                      {h.eta_minutes ? `ETA ${h.eta_minutes}m` : '---'}
-                    </span>
-                  </div>
-                  <div className="w-full bg-slate-700 h-1.5 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full transition-all ${h.available_beds / h.total_beds < 0.2 ? 'bg-red-500' : 'bg-blue-500'}`}
-                      style={{ width: `${(h.available_beds / h.total_beds) * 100}%` }}
-                    />
-                  </div>
-                  <div className="flex justify-between mt-1 text-[9px] text-slate-500">
-                    <span>{h.available_beds} beds free</span>
-                    <span>{Math.round((h.available_beds / h.total_beds) * 100)}%</span>
-                  </div>
+            <h2 className="text-[10px] uppercase text-slate-500 font-black mb-4 tracking-[0.2em]">Live Status Overview</h2>
+            <div className="grid gap-4">
+              <div className="glass-card p-5 rounded-2xl group cursor-default">
+                <p className="text-4xl font-black text-white group-hover:text-blue-400 transition-colors uppercase tabular-nums">{victims.length}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Total Ingested</p>
                 </div>
-              ))}
+              </div>
+              <div className="glass-card p-5 rounded-2xl border-red-500/20 group cursor-default">
+                <p className="text-4xl font-black text-red-500 group-hover:scale-110 transition-transform origin-left tabular-nums">
+                  {victims.filter(v => v.severity === 3).length}
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Critical Cases</p>
+                </div>
+              </div>
             </div>
           </section>
 
-          <section className="overflow-hidden">
-            <h2 className="text-xs uppercase text-slate-500 font-semibold mb-3 tracking-widest">Responders</h2>
-            <div className="space-y-2 overflow-y-auto max-h-[150px] pr-2 custom-scrollbar">
+          <section className="flex-1 overflow-hidden flex flex-col min-h-0">
+            <h2 className="text-[10px] uppercase text-slate-500 font-black mb-4 tracking-[0.2em]">Hospital Load</h2>
+            <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar flex-1">
+              {hospitals.length === 0 ? (
+                [1, 2, 3].map(i => (
+                  <div key={i} className="h-20 glass-card rounded-xl animate-pulse" />
+                ))
+              ) : (
+                hospitals.map(h => (
+                  <div key={h.id} className="glass-card p-4 rounded-xl border-l-4 border-l-blue-500/50">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-black text-slate-200 truncate pr-2 uppercase">{h.name}</p>
+                        <p className="text-[9px] text-slate-500 mt-0.5 font-bold uppercase tracking-tight">{h.specialty}</p>
+                      </div>
+                      <span className={`text-[9px] px-2 py-0.5 rounded-full font-black tabular-nums ${h.eta_minutes < 15 ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
+                        {h.eta_minutes ? `${h.eta_minutes}m` : '--'}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-900/50 h-2 rounded-full overflow-hidden border border-slate-700/30">
+                      <div
+                        className={`h-full transition-all duration-1000 ${h.available_beds / h.total_beds < 0.2 ? 'premium-gradient-red' : 'premium-gradient-blue'}`}
+                        style={{ width: `${(h.available_beds / h.total_beds) * 100}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between mt-2 text-[9px] font-black tracking-widest">
+                      <span className="text-slate-500 uppercase">{h.available_beds} FREE</span>
+                      <span className="text-blue-400">{Math.round((h.available_beds / h.total_beds) * 100)}%</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="shrink-0 pt-4 border-t border-slate-800/50">
+            <h2 className="text-[10px] uppercase text-slate-500 font-black mb-4 tracking-[0.2em]">Deployment Status</h2>
+            <div className="space-y-3 max-h-[160px] overflow-y-auto pr-2 custom-scrollbar">
               {mockAmbulances.map(amb => (
-                <div key={amb.id} className="bg-slate-800/50 p-3 rounded border border-slate-700/50">
+                <div key={amb.id} className="glass-card p-3 rounded-xl border border-slate-700/30">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs flex items-center"><Truck size={14} className="mr-2 text-blue-400" /> {amb.id}</span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded uppercase font-bold ${amb.status === 'available' ? 'text-green-400' : 'text-orange-400'}`}>
+                    <div className="flex items-center gap-2">
+                      <Truck size={14} className="text-blue-400" />
+                      <span className="text-[11px] font-black text-slate-300 uppercase tabular-nums">{amb.id}</span>
+                    </div>
+                    <span className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest ${amb.status.toLowerCase() === 'available' ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
                       {amb.status}
                     </span>
                   </div>
-                  {amb.status === 'available' && (
+                  {amb.status.toLowerCase() === 'available' && (
                     <button
                       onClick={() => selectedAmbulance === amb.id ? clearRoute() : planRoute(amb)}
                       disabled={routeLoading && selectedAmbulance === amb.id}
-                      className={`w-full mt-2 py-1.5 rounded-lg text-xs font-semibold transition-colors ${selectedAmbulance === amb.id
-                        ? "bg-orange-500/20 border border-orange-500/50 text-orange-400 hover:bg-orange-500/10"
-                        : "bg-slate-700 hover:bg-slate-600 text-slate-300"
+                      className={`w-full mt-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-[0.1em] transition-all transform active:scale-95 ${selectedAmbulance === amb.id
+                        ? "bg-orange-500/20 border border-orange-500/50 text-orange-400"
+                        : "bg-slate-700/50 hover:bg-slate-600/80 text-slate-200 border border-slate-600/30"
                         }`}
                     >
                       {selectedAmbulance === amb.id ? (
                         <span className="flex items-center justify-center gap-2">
-                          <MapPin size={12} /> Clear Route
+                          <MapPin size={12} /> CLEAR MISSION
                         </span>
                       ) : (
-                        <span className="flex items-center justify-center gap-2">
-                          {routeLoading && selectedAmbulance === amb.id ? "Calculating..." : <><Truck size={12} /> Plan Route</>}
+                        <span className="flex items-center justify-center gap-2 text-blue-400">
+                          {routeLoading && selectedAmbulance === amb.id ? "CALCULATING..." : <><Truck size={12} /> OPTIMIZE ROUTE</>}
                         </span>
                       )}
                     </button>
@@ -552,39 +572,57 @@ export default function App() {
         </main>
 
         {/* RIGHT SIDEBAR - PRIORITY LIST */}
-        <aside className="w-80 bg-slate-900 border-l border-slate-800 p-4 flex flex-col shrink-0 z-10">
-          <h2 className="text-xs uppercase text-slate-500 font-semibold mb-4 tracking-widest">High Priority Queue</h2>
-          <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
-            {victims
-              .filter(v => v.status !== 'assigned')
-              .sort((a, b) => b.severity - a.severity)
-              .map(v => (
-                <div key={v.id} className={`p-3 rounded-lg border bg-slate-800/80 transition-all hover:bg-slate-800 ${v.severity === 3 ? 'border-red-500/40 shadow-[0_0_10px_rgba(239,68,68,0.1)]' : 'border-slate-700'
-                  }`}>
-                  <div className="flex justify-between items-start mb-2">
-                    <span className="font-bold text-slate-100 text-sm">{v.id}</span>
-                    <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${v.severity === 3 ? 'bg-red-500 text-white' : 'bg-slate-700 text-slate-300'
-                      }`}>
-                      {v.severity === 3 ? 'Critical' : v.severity === 2 ? 'High' : 'Stable'}
-                    </span>
+        <aside className="w-80 glass-panel border-l p-6 flex flex-col shrink-0 z-10 overflow-hidden">
+          <h2 className="text-[10px] uppercase text-slate-500 font-black mb-6 tracking-[0.2em]">Incident Response Feed</h2>
+          <div className="flex-1 overflow-y-auto space-y-4 pr-1 custom-scrollbar">
+            {loading ? (
+              [1, 2, 3, 4].map(i => (
+                <div key={i} className="h-28 glass-card rounded-2xl animate-pulse" />
+              ))
+            ) : (
+              victims
+                .filter(v => v.status !== 'assigned')
+                .sort((a, b) => b.severity - a.severity)
+                .map(v => (
+                  <div key={v.id} className={`p-4 rounded-2xl glass-card relative overflow-hidden group ${v.severity === 3 ? 'border-red-500/30' : ''}`}>
+                    {v.severity === 3 && <div className="absolute top-0 left-0 w-1.5 h-full bg-red-500/80 shadow-[0_0_15px_rgba(239,68,68,0.5)]" />}
+
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex flex-col">
+                        <span className="font-black text-slate-100 text-xs tabular-nums tracking-wider uppercase">{v.id}</span>
+                        <span className="text-[8px] text-slate-500 font-bold uppercase mt-0.5">Reported Vitals</span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${v.severity === 3 ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-slate-700 text-slate-300'}`}>
+                        {v.severity === 3 ? 'Critical' : v.severity === 2 ? 'High' : 'Stable'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 mb-4 text-[10px] tabular-nums font-bold">
+                      <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/20">
+                        <p className="text-slate-500 text-[8px] uppercase mb-0.5 tracking-tighter">Heart Rate</p>
+                        <p className="text-blue-400">{v.heart_rate} <span className="text-slate-600 text-[8px]">BPM</span></p>
+                      </div>
+                      <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/20">
+                        <p className="text-slate-500 text-[8px] uppercase mb-0.5 tracking-tighter">Oxygen</p>
+                        <p className={v.spo2 < 90 ? 'text-red-400' : 'text-green-400'}>{v.spo2}<span className="text-[8px]">%</span></p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleAssign(v.id)}
+                      className="w-full glass-card bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-[10px] font-black tracking-[0.1em] flex items-center justify-center transition-all group-hover:shadow-lg group-hover:shadow-blue-500/20"
+                    >
+                      <MapPin size={12} className="mr-2" /> DISPATCH MISSION
+                    </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-y-1 text-[10px] text-slate-400 mb-3">
-                    <p>Age: <span className="text-slate-200">{v.age}</span></p>
-                    <p>SpO2: <span className={v.spo2 < 90 ? 'text-red-400 font-bold' : 'text-slate-200'}>{v.spo2}%</span></p>
-                    <p>HR: <span className="text-slate-200">{v.heart_rate}</span></p>
-                    <p>Temp: <span className="text-slate-200">{v.temperature}°C</span></p>
-                  </div>
-                  <button
-                    onClick={() => handleAssign(v.id)}
-                    className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded text-[10px] font-bold flex items-center justify-center transition-colors"
-                  >
-                    <MapPin size={12} className="mr-2" /> DISPATCH NOW
-                  </button>
+                ))
+            )}
+            {!loading && victims.filter(v => v.status !== 'assigned').length === 0 && (
+              <div className="text-center py-20 flex flex-col items-center">
+                <div className="w-12 h-12 bg-slate-800 rounded-full flex items-center justify-center mb-4">
+                  <Activity size={24} className="text-slate-700" />
                 </div>
-              ))}
-            {victims.filter(v => v.status !== 'assigned').length === 0 && (
-              <div className="text-center py-10 text-slate-600 text-xs italic">
-                No pending emergencies
+                <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest">No Active Emergencies</p>
               </div>
             )}
           </div>

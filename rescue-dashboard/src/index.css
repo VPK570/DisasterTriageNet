@@ -1,19 +1,20 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
 
-/* Keep your existing .leaflet-container and #root styles below this */
-
-/* 1. MUST BE AT THE TOP: Leaflet Map Styles */
-@import "leaflet/dist/leaflet.css";
-
-/* 2. Tailwind Directives */
+/* 1. Base Setup */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* 3. Global Reset & Layout Fixes */
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  --slate-950: #020617;
+  --slate-900: #0f172a;
+  --slate-800: #1e293b;
+  --slate-700: #334155;
+  --accent-blue: #3b82f6;
+  --glass-bg: rgba(15, 23, 42, 0.7);
+  --glass-border: rgba(51, 65, 85, 0.5);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   color-scheme: dark;
 }
 
@@ -22,42 +23,70 @@
   width: 100vw;
   margin: 0;
   padding: 0;
-  background-color: #020617; /* Matches slate-950 */
-  overflow: hidden; /* Prevents double scrollbars */
+  background-color: var(--slate-950);
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.05) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(239, 68, 68, 0.05) 0px, transparent 50%);
+  overflow: hidden;
 }
 
-/* 4. Map & Component Specific Overrides */
+/* 2. Glassmorphism Utilities */
+@layer components {
+  .glass-panel {
+    @apply bg-slate-900/70 backdrop-blur-xl border-slate-800/50;
+  }
+  
+  .glass-card {
+    @apply bg-slate-800/40 backdrop-blur-md border border-slate-700/50 shadow-lg transition-all duration-300;
+  }
+
+  .glass-card:hover {
+    @apply bg-slate-800/60 border-slate-600/50 scale-[1.02] shadow-xl;
+  }
+
+  .premium-gradient-red {
+    background: linear-gradient(135deg, #ef4444 0%, #991b1b 100%);
+  }
+
+  .premium-gradient-blue {
+    background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+  }
+}
+
+/* 3. Global Transitions & Polishing */
+* {
+  @apply transition-colors duration-200;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-slate-700/50 rounded-full hover:bg-slate-600;
+}
+
+/* 4. Leaflet Overrides */
 .leaflet-container {
   width: 100%;
   height: 100%;
   z-index: 1;
+  background: var(--slate-950) !important;
 }
 
-/* Custom Scrollbar for the Priority List */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: #0f172a;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 10px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #475569;
-}
-
-/* Ensure Popup text is readable in dark mode */
 .leaflet-popup-content-wrapper {
-  background: #1e293b !important;
-  color: #f1f5f9 !important;
-  border: 1px solid #334155;
+  @apply !bg-slate-900/90 !backdrop-blur-xl !text-slate-100 !border !border-slate-700/50 !rounded-xl !shadow-2xl;
 }
 
 .leaflet-popup-tip {
-  background: #1e293b !important;
+  @apply !bg-slate-900/90;
+}
+
+.custom-popup .leaflet-popup-content {
+  margin: 0 !important;
+  width: auto !important;
 }
