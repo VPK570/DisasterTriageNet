@@ -2,13 +2,15 @@ from flask import Blueprint, request, jsonify
 from middleware.role_guard import require_role
 import sqlite3
 import math
+import os
 
 responder_bp = Blueprint('responder', __name__)
 
-DB_PATH = "triage.db"
+# Use absolute path to be safe regardless of working directory
+DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'triage.db')
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -18,43 +20,27 @@ def haversine(lat1, lng1, lat2, lng2):
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
     dlambda = math.radians(lng2 - lng1)
-    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+    a = math.sin(dphi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2)**2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-# ── Existing placeholder (unchanged) ────────────────────────────
-@responder_bp.route('/dashboard', methods=['GET'])
+@responder_bp.route('/api/responder/dashboard', methods=['GET'])
 @require_role('responder')
 def dashboard():
     return jsonify({'message': 'Responder dashboard', 'user_id': request.user_id})
 
 
-# ── NEW: Multi-victim route optimizer ───────────────────────────
-@responder_bp.route('/route', methods=['POST'])
+@responder_bp.route('/api/responder/route', methods=['POST'])
 def optimize_route():
     """
     Greedy nearest-neighbour route from an ambulance's current position
     through all unassigned victims within radius_km (default 2 km).
 
-    NOTE: No auth required here so the dashboard can call it without
-    role-gating. Add @require_role('responder') if you lock down later.
-
     Request body (JSON):
     {
-      "lat": 13.082,          # ambulance current latitude
-      "lng": 80.270,          # ambulance current longitude
-      "radius_km": 2.0        # optional, default 2 km
-    }
-
-    Response:
-    {
-      "route": [
-        { "id": "V-1234", "lat": ..., "lng": ..., "triage_level": 3,
-          "distance_from_prev_km": 0.4 },
-        ...
-      ],
-      "total_distance_km": 1.8,
-      "victim_count": 4
+      "lat": 13.082,
+      "lng": 80.270,
+      "radius_km": 2.0  # optional
     }
     """
     data = request.get_json()
@@ -83,22 +69,20 @@ def optimize_route():
     if not nearby:
         return jsonify({'route': [], 'total_distance_km': 0, 'victim_count': 0})
 
-    # Greedy nearest-neighbour starting from ambulance position
-    # Priority: prefer higher triage_level (critical first) when distances are close.
-    # Tie-break: if two victims are within 0.1 km of each other, pick higher severity.
+    # Greedy nearest-neighbour with severity tiebreak
     unvisited = list(nearby)
     route = []
     current_lat, current_lng = amb_lat, amb_lng
     total_dist = 0.0
 
     while unvisited:
-        def score(v):
-            dist = haversine(current_lat, current_lng, v['lat'], v['lng'])
-            # Slight severity bonus: subtract up to 0.3 km for critical victims
-            severity_bonus = v['triage_level'] * 0.1
-            return dist - severity_bonus
+        # Snapshot current position so the lambda captures fixed values
+        _clat, _clng = current_lat, current_lng
+        next_victim = min(
+            unvisited,
+            key=lambda v: haversine(_clat, _clng, v['lat'], v['lng']) - v['triage_level'] * 0.1
+        )
 
-        next_victim = min(unvisited, key=score)
         leg_dist = haversine(current_lat, current_lng, next_victim['lat'], next_victim['lng'])
         total_dist += leg_dist
 
@@ -112,7 +96,8 @@ def optimize_route():
 
         current_lat = next_victim['lat']
         current_lng = next_victim['lng']
-        unvisited.remove(next_victim)
+        # Use identity comparison (is) to avoid false matches on equal dicts
+        unvisited = [v for v in unvisited if v is not next_victim]
 
     return jsonify({
         'route': route,
