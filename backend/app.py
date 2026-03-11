@@ -144,21 +144,81 @@ def ingest_data():
         "assigned_to": hosp_name
     }), 201
 
-@app.route('/api/assign/<victim_id>', methods=['POST'])
-def assign_victim(victim_id):
-    """Mark a victim as dispatched/assigned to an ambulance."""
+@app.route('/api/ambulances', methods=['GET'])
+def get_ambulances():
+    """Return all ambulances from the database."""
+    try:
+        conn = get_db_connection()
+        rows = conn.execute('SELECT * FROM ambulances ORDER BY id').fetchall()
+        conn.close()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/ambulances/<amb_id>/status', methods=['PATCH'])
+def update_ambulance_status(amb_id):
+    """Update an ambulance's status and optionally its assigned victim."""
+    data = request.json
+    if not data or 'status' not in data:
+        return jsonify({"error": "'status' field is required"}), 400
+    new_status = data['status'].lower()
+    if new_status not in ('available', 'busy', 'offline'):
+        return jsonify({"error": "status must be available, busy, or offline"}), 400
+    assigned_victim = data.get('assigned_victim', None)
     conn = None
     try:
         conn = get_db_connection()
-        row = conn.execute("SELECT id, status FROM victims WHERE id = ?", (victim_id,)).fetchone()
+        row = conn.execute("SELECT id FROM ambulances WHERE id = ?", (amb_id,)).fetchone()
         if not row:
-            return jsonify({"error": "Victim not found"}), 404
-        if row['status'] == 'assigned':
-            return jsonify({"message": "Already assigned", "victim_id": victim_id}), 200
-        conn.execute("UPDATE victims SET status = 'assigned' WHERE id = ?", (victim_id,))
+            return jsonify({"error": "Ambulance not found"}), 404
+        conn.execute(
+            "UPDATE ambulances SET status = ?, assigned_victim = ? WHERE id = ?",
+            (new_status, assigned_victim, amb_id)
+        )
         conn.commit()
-        socketio.emit('victim_assigned', {'victim_id': victim_id})
-        return jsonify({"status": "assigned", "victim_id": victim_id}), 200
+        socketio.emit('ambulance_updated', {'amb_id': amb_id, 'status': new_status, 'assigned_victim': assigned_victim})
+        return jsonify({"status": new_status, "amb_id": amb_id}), 200
+    except sqlite3.Error as e:
+        if conn: conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/assign/<victim_id>', methods=['POST'])
+def assign_victim(victim_id):
+    """Mark a victim as dispatched and auto-assign the nearest available ambulance."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        victim = conn.execute("SELECT * FROM victims WHERE id = ?", (victim_id,)).fetchone()
+        if not victim:
+            return jsonify({"error": "Victim not found"}), 404
+        if victim['status'] == 'assigned':
+            return jsonify({"message": "Already assigned", "victim_id": victim_id}), 200
+
+        conn.execute("UPDATE victims SET status = 'assigned' WHERE id = ?", (victim_id,))
+
+        # Auto-assign the nearest available ambulance
+        ambulances = conn.execute(
+            "SELECT * FROM ambulances WHERE status = 'available'"
+        ).fetchall()
+        assigned_amb = None
+        if ambulances and victim['lat'] and victim['lng']:
+            nearest = min(
+                ambulances,
+                key=lambda a: get_distance(victim['lat'], victim['lng'], a['lat'], a['lng'])
+            )
+            conn.execute(
+                "UPDATE ambulances SET status = 'busy', assigned_victim = ? WHERE id = ?",
+                (victim_id, nearest['id'])
+            )
+            assigned_amb = nearest['id']
+
+        conn.commit()
+        socketio.emit('victim_assigned', {'victim_id': victim_id, 'ambulance_id': assigned_amb})
+        if assigned_amb:
+            socketio.emit('ambulance_updated', {'amb_id': assigned_amb, 'status': 'busy', 'assigned_victim': victim_id})
+        return jsonify({"status": "assigned", "victim_id": victim_id, "ambulance_assigned": assigned_amb}), 200
     except sqlite3.Error as e:
         if conn: conn.rollback()
         return jsonify({"error": str(e)}), 500

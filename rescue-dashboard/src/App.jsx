@@ -7,7 +7,6 @@ import { HeatmapLayer } from 'react-leaflet-heatmap-layer-v3';
 import VictimCard from './components/VictimCard';
 import 'leaflet/dist/leaflet.css';
 import { AlertTriangle, Activity, MapPin, Truck, Hospital, QrCode } from 'lucide-react';
-import { mockAmbulances } from './data/mockData';
 
 // --- CONFIGURATION & ICONS ---
 const API_BASE_URL = 'http://localhost:5001/api';
@@ -91,6 +90,7 @@ export default function App() {
   const [victims, setVictims] = useState([]);
   const [clusters, setClusters] = useState([]);
   const [hospitals, setHospitals] = useState([]);
+  const [ambulances, setAmbulances] = useState([]);
   const [loading, setLoading] = useState(true);
   const [muted, setMuted] = useState(false);
   const [qrData, setQrData] = useState({});
@@ -123,17 +123,19 @@ export default function App() {
 
   const fetchAll = async () => {
     try {
-      const [vRes, cRes, hRes, iRes] = await Promise.all([
+      const [vRes, cRes, hRes, iRes, aRes] = await Promise.all([
         fetch(`${API_BASE_URL}/victims?incident_id=${activeIncident}`),
         fetch(`${API_BASE_URL}/clusters?incident_id=${activeIncident}`),
         fetch(`${API_BASE_URL}/hospitals`),
-        fetch(`${API_BASE_URL}/incidents`)
+        fetch(`${API_BASE_URL}/incidents`),
+        fetch(`${API_BASE_URL}/ambulances`),
       ]);
 
       const vData = await vRes.json();
       const mappedVictims = vData.map(v => ({ ...v, severity: v.triage_level }));
 
       if (iRes.ok) setIncidents(await iRes.json());
+      if (aRes.ok) setAmbulances(await aRes.json());
 
       const newCritical = mappedVictims.filter(
         v => v.triage_level === 3 && !prevVictimIdsRef.current.has(v.id)
@@ -142,7 +144,6 @@ export default function App() {
       prevVictimIdsRef.current = new Set(mappedVictims.map(v => v.id));
 
       setVictims(mappedVictims);
-
       if (cRes.ok) setClusters(await cRes.json());
       if (hRes.ok) setHospitals(await hRes.json());
       setLoading(false);
@@ -184,6 +185,13 @@ export default function App() {
     socket.on("victim_assigned", ({ victim_id }) => {
       setVictims(prev => prev.map(v =>
         v.id === victim_id ? { ...v, status: 'assigned' } : v
+      ));
+    });
+
+    // Update ambulance status in real-time without a full refresh
+    socket.on("ambulance_updated", ({ amb_id, status, assigned_victim }) => {
+      setAmbulances(prev => prev.map(a =>
+        a.id === amb_id ? { ...a, status, assigned_victim } : a
       ));
     });
 
@@ -382,39 +390,45 @@ export default function App() {
           <section className="shrink-0 pt-4 border-t border-slate-800/50">
             <h2 className="text-[10px] uppercase text-slate-500 font-black mb-4 tracking-[0.2em]">Deployment Status</h2>
             <div className="space-y-3 max-h-[160px] overflow-y-auto pr-2 custom-scrollbar">
-              {mockAmbulances.map(amb => (
-                <div key={amb.id} className="glass-card p-3 rounded-xl border border-slate-700/30">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Truck size={14} className="text-blue-400" />
-                      <span className="text-[11px] font-black text-slate-300 uppercase tabular-nums">{amb.id}</span>
+              {ambulances.length === 0 ? (
+                [1, 2].map(i => (
+                  <div key={i} className="h-16 glass-card rounded-xl animate-pulse" />
+                ))
+              ) : (
+                ambulances.map(amb => (
+                  <div key={amb.id} className="glass-card p-3 rounded-xl border border-slate-700/30">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Truck size={14} className="text-blue-400" />
+                        <span className="text-[11px] font-black text-slate-300 uppercase tabular-nums">{amb.id}</span>
+                      </div>
+                      <span className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest ${amb.status.toLowerCase() === 'available' ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
+                        {amb.status}
+                      </span>
                     </div>
-                    <span className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest ${amb.status.toLowerCase() === 'available' ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
-                      {amb.status}
-                    </span>
+                    {amb.status.toLowerCase() === 'available' && (
+                      <button
+                        onClick={() => selectedAmbulance === amb.id ? clearRoute() : planRoute(amb)}
+                        disabled={routeLoading && selectedAmbulance === amb.id}
+                        className={`w-full mt-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-[0.1em] transition-all transform active:scale-95 ${selectedAmbulance === amb.id
+                          ? "bg-orange-500/20 border border-orange-500/50 text-orange-400"
+                          : "bg-slate-700/50 hover:bg-slate-600/80 text-slate-200 border border-slate-600/30"
+                          }`}
+                      >
+                        {selectedAmbulance === amb.id ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <MapPin size={12} /> CLEAR MISSION
+                          </span>
+                        ) : (
+                          <span className="flex items-center justify-center gap-2 text-blue-400">
+                            {routeLoading && selectedAmbulance === amb.id ? "CALCULATING..." : <><Truck size={12} /> OPTIMIZE ROUTE</>}
+                          </span>
+                        )}
+                      </button>
+                    )}
                   </div>
-                  {amb.status.toLowerCase() === 'available' && (
-                    <button
-                      onClick={() => selectedAmbulance === amb.id ? clearRoute() : planRoute(amb)}
-                      disabled={routeLoading && selectedAmbulance === amb.id}
-                      className={`w-full mt-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-[0.1em] transition-all transform active:scale-95 ${selectedAmbulance === amb.id
-                        ? "bg-orange-500/20 border border-orange-500/50 text-orange-400"
-                        : "bg-slate-700/50 hover:bg-slate-600/80 text-slate-200 border border-slate-600/30"
-                        }`}
-                    >
-                      {selectedAmbulance === amb.id ? (
-                        <span className="flex items-center justify-center gap-2">
-                          <MapPin size={12} /> CLEAR MISSION
-                        </span>
-                      ) : (
-                        <span className="flex items-center justify-center gap-2 text-blue-400">
-                          {routeLoading && selectedAmbulance === amb.id ? "CALCULATING..." : <><Truck size={12} /> OPTIMIZE ROUTE</>}
-                        </span>
-                      )}
-                    </button>
-                  )}
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </section>
         </aside>

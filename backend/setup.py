@@ -89,24 +89,45 @@ def init_db():
         )
     ''')
 
+    # 5. Ambulances Table: Tracks field responder units and their status
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ambulances (
+            id TEXT PRIMARY KEY,
+            status TEXT DEFAULT 'available',
+            location TEXT,
+            lat REAL,
+            lng REAL,
+            assigned_victim TEXT DEFAULT NULL
+        )
+    ''')
+
     # Seed Data: Real Chennai Hospitals
     hospitals = [
         ("Rajiv Gandhi Govt General Hospital", 13.0818, 80.2755, 500, 150, "General Emergency"),
-        ("Apollo Main Hospital, Greams Road", 13.0607, 80.2512, 200, 45, "Trauma/Cardiac"),
-        ("SIMS Hospital, Vadapalani", 13.0500, 80.2121, 150, 30, "Multi-Specialty"),
-        ("Fortis Malar Hospital, Adyar", 13.0067, 80.2578, 120, 20, "Cardiac/Neurology"),
-        ("MIOT International, Manapakkam", 13.0205, 80.1865, 250, 60, "Orthopedic/Trauma"),
-        ("Stanley Medical College Hospital", 13.1054, 80.2872, 400, 100, "General/Burn Care")
+        ("Apollo Main Hospital, Greams Road",  13.0607, 80.2512, 200,  45, "Trauma/Cardiac"),
+        ("SIMS Hospital, Vadapalani",          13.0500, 80.2121, 150,  30, "Multi-Specialty"),
+        ("Fortis Malar Hospital, Adyar",       13.0067, 80.2578, 120,  20, "Cardiac/Neurology"),
+        ("MIOT International, Manapakkam",     13.0205, 80.1865, 250,  60, "Orthopedic/Trauma"),
+        ("Stanley Medical College Hospital",   13.1054, 80.2872, 400, 100, "General/Burn Care"),
     ]
-
     cursor.executemany('''
-        INSERT INTO hospitals (name, lat, lng, total_beds, available_beds, specialty) 
+        INSERT INTO hospitals (name, lat, lng, total_beds, available_beds, specialty)
         VALUES (?, ?, ?, ?, ?, ?)
     ''', hospitals)
 
+    # Seed ambulances — matches the former mockData.js entries
+    ambulances = [
+        ("AMB-01", "available", "Adyar",    13.0012, 80.2565, None),
+        ("AMB-02", "busy",      "T. Nagar", 13.0418, 80.2341, None),
+    ]
+    cursor.executemany('''
+        INSERT INTO ambulances (id, status, location, lat, lng, assigned_victim)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', ambulances)
+
     conn.commit()
     conn.close()
-    print("✅ Database 'triage.db' successfully initialized with Chennai hospitals.")
+    print("Database 'triage.db' initialized with hospitals and ambulances.")
 
 if __name__ == "__main__":
     init_db()
