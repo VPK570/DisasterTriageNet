@@ -34,20 +34,22 @@ DisasterTriageNet/
 ## 🚀 Getting Started
 
 ### 1. Backend Setup (Flask)
+The backend uses **Python 3.13** and is optimized for stability with `eventlet`.
 ```bash
 cd backend
-# Create environment
+# Create and activate environment
 python -m venv venv
 source venv/bin/activate  # Mac/Linux
-# Install dependencies
+# Install pinned, verified dependencies
 pip install -r requirements.txt
-# Initialize Database
+# Initialize Database (clean slate)
 python setup.py
 # Start Server
 python app.py
 ```
 
-### 2. Frontend Setup (React)
+### 2. Frontend Setup (React 19)
+The dashboard is built with **Vite** and **React 19**, featuring a high-end "Command Center" UI.
 ```bash
 cd rescue-dashboard
 npm install
@@ -55,9 +57,10 @@ npm run dev
 ```
 
 ### 3. Run Simulation
-To populate the dashboard with live data, run the simulator in a separate terminal:
+To populate the premium dashboard with real-time waves of patients:
 ```bash
 cd backend
+source venv/bin/activate
 python simulator.py
 ```
 
