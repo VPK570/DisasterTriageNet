@@ -1,14 +1,14 @@
 import eventlet
 eventlet.monkey_patch()
 from flask import Flask, jsonify, request
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO
 from flask_cors import CORS
 import sqlite3
 from datetime import datetime
 from ml_model import predict_triage
 from clustering import calculate_hotspots
 from math import radians, cos, sin, asin, sqrt
-import random
+import uuid
 import os
 import qrcode
 import io
@@ -22,9 +22,11 @@ from routes.responder_routes import responder_bp
 from routes.admin_routes import admin_bp
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
 
-CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5173", "http://0.0.0.0:5173"]}})
+# Match SocketIO CORS with REST CORS — only accept from known dashboard origin
+ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS)
+CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
 
 # Register Auth Blueprints
 app.register_blueprint(register_bp, url_prefix='/api/auth')
@@ -44,7 +46,7 @@ def get_db_connection():
     return conn
 
 def get_distance(lat1, lon1, lat2, lon2):
-    R = 6371.0 
+    R = 6371.0
     lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
     dlat, dlon = lat2 - lat1, lon2 - lon1
     a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
@@ -55,10 +57,8 @@ def match_hospital(victim_lat, victim_lng):
         conn = get_db_connection()
         hospitals = conn.execute('SELECT * FROM hospitals WHERE available_beds > 0').fetchall()
         conn.close()
-
         best_hospital = None
         min_distance = float('inf')
-
         for h in hospitals:
             dist = get_distance(victim_lat, victim_lng, h['lat'], h['lng'])
             if dist < min_distance:
@@ -84,15 +84,22 @@ def ingest_data():
     if not data:
         return jsonify({"error": "No data received"}), 400
 
-    victim_id = f"V-{random.randint(1000, 9999)}"
-    
+    # Validate required fields
+    required = ['age', 'heart_rate', 'spo2', 'temperature', 'lat', 'lng']
+    missing = [f for f in required if f not in data]
+    if missing:
+        return jsonify({"error": f"Missing required fields: {missing}"}), 400
+
+    # Use UUID to avoid ID collisions
+    victim_id = f"V-{uuid.uuid4().hex[:8].upper()}"
+
     try:
         severity = predict_triage(
             data['age'], data['heart_rate'], data['spo2'], data['temperature']
         )
     except Exception as e:
         print(f"ML Prediction Error: {e}")
-        severity = 1 
+        severity = 1  # Fallback to moderate
 
     matched_hosp = match_hospital(data['lat'], data['lng'])
     hosp_name = matched_hosp['name'] if matched_hosp else "Waitlisted"
@@ -108,10 +115,8 @@ def ingest_data():
             victim_id, data['age'], data['heart_rate'], data['spo2'], data['temperature'],
             severity, data['lat'], data['lng'], datetime.now().isoformat(), 'unassigned', hosp_name, incident_id
         ))
-        
         if matched_hosp:
             conn.execute('UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = ?', (matched_hosp['id'],))
-        
         conn.commit()
     except sqlite3.Error as e:
         print(f"Database Insertion Error: {e}")
@@ -133,10 +138,32 @@ def ingest_data():
     })
 
     return jsonify({
-        "status": "success", 
+        "status": "success",
+        "victim_id": victim_id,
         "predicted_severity": severity,
         "assigned_to": hosp_name
     }), 201
+
+@app.route('/api/assign/<victim_id>', methods=['POST'])
+def assign_victim(victim_id):
+    """Mark a victim as dispatched/assigned to an ambulance."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        row = conn.execute("SELECT id, status FROM victims WHERE id = ?", (victim_id,)).fetchone()
+        if not row:
+            return jsonify({"error": "Victim not found"}), 404
+        if row['status'] == 'assigned':
+            return jsonify({"message": "Already assigned", "victim_id": victim_id}), 200
+        conn.execute("UPDATE victims SET status = 'assigned' WHERE id = ?", (victim_id,))
+        conn.commit()
+        socketio.emit('victim_assigned', {'victim_id': victim_id})
+        return jsonify({"status": "assigned", "victim_id": victim_id}), 200
+    except sqlite3.Error as e:
+        if conn: conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn: conn.close()
 
 @app.route('/api/incidents', methods=['GET'])
 def get_incidents():
@@ -152,7 +179,9 @@ def get_incidents():
 def create_incident():
     try:
         data = request.json
-        inc_id = f"INC-{random.randint(100, 999)}"
+        if not data or 'name' not in data:
+            return jsonify({"error": "'name' field is required"}), 400
+        inc_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
         conn = get_db_connection()
         conn.execute(
             'INSERT INTO incidents (id, name, type, lat, lng) VALUES (?, ?, ?, ?, ?)',
@@ -166,15 +195,18 @@ def create_incident():
 
 @app.route('/api/victims/<victim_id>/qr', methods=['GET'])
 def get_victim_qr(victim_id):
-    card_url = f"http://localhost:5173/victim/{victim_id}"
-    qr = qrcode.QRCode(box_size=8, border=2)
-    qr.add_data(card_url)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="#f1f5f9", back_color="#0f172a")
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
-    encoded = base64.b64encode(buffer.getvalue()).decode()
-    return jsonify({'qr_base64': encoded, 'url': card_url, 'victim_id': victim_id})
+    try:
+        card_url = f"http://localhost:5173/victim/{victim_id}"
+        qr = qrcode.QRCode(box_size=8, border=2)
+        qr.add_data(card_url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="#f1f5f9", back_color="#0f172a")
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode()
+        return jsonify({'qr_base64': encoded, 'url': card_url, 'victim_id': victim_id})
+    except Exception as e:
+        return jsonify({"error": f"QR generation failed: {str(e)}"}), 500
 
 @app.route('/api/victims', methods=['GET'])
 def get_victims():
@@ -182,9 +214,14 @@ def get_victims():
         incident_id = request.args.get('incident_id')
         conn = get_db_connection()
         if incident_id:
-            victims = conn.execute('SELECT * FROM victims WHERE incident_id=? ORDER BY triage_level DESC, timestamp DESC', (incident_id,)).fetchall()
+            victims = conn.execute(
+                'SELECT * FROM victims WHERE incident_id=? ORDER BY triage_level DESC, timestamp DESC',
+                (incident_id,)
+            ).fetchall()
         else:
-            victims = conn.execute('SELECT * FROM victims ORDER BY triage_level DESC, timestamp DESC').fetchall()
+            victims = conn.execute(
+                'SELECT * FROM victims ORDER BY triage_level DESC, timestamp DESC'
+            ).fetchall()
         conn.close()
         return jsonify([dict(row) for row in victims])
     except Exception as e:
