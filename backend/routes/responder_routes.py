@@ -6,8 +6,7 @@ import os
 
 responder_bp = Blueprint('responder', __name__)
 
-# Use absolute path to be safe regardless of working directory
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'triage.db')
+from config import DB_PATH
 
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=30)

@@ -2,6 +2,28 @@ from functools import wraps
 from flask import request, jsonify
 from auth.jwt_handler import decode_jwt
 
+def require_auth(f):
+    """
+    Decorator to ensure a valid JWT is present, regardless of role.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Missing or invalid authorization header"}), 401
+        
+        token = auth_header.split(" ")[1]
+        decoded = decode_jwt(token)
+        
+        if not decoded:
+            return jsonify({"error": "Invalid or expired token"}), 401
+            
+        request.user_id = decoded.get("user_id")
+        request.user_role = decoded.get("role")
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
 def require_role(*allowed_roles):
     """
     Decorator to protect routes based on user role.

@@ -1,3 +1,16 @@
+## ARCHITECTURE
+
+A software project composed of the following subsystems:
+
+- **backend/**: Primary subsystem containing 24 files
+- **rescue-dashboard/**: Primary subsystem containing 14 files
+- **Root**: Contains scripts and execution points
+
+## ENTRY_POINTS
+
+### `backend/app.py`
+
+```python
 import eventlet
 eventlet.monkey_patch()
 from flask import Flask, jsonify, request
@@ -298,155 +311,317 @@ def replenish_hospital(hospital_id):
     Manually add beds back to a hospital (admin use).
     Accepts { "beds": N } — adds N beds, capped at total_beds.
     """
-    data = request.json
-    if not data or 'beds' not in data:
-        return jsonify({"error": "'beds' field is required"}), 400
-    try:
-        beds_to_add = int(data['beds'])
-        if beds_to_add <= 0:
-            return jsonify({"error": "'beds' must be a positive integer"}), 400
-    except (TypeError, ValueError):
-        return jsonify({"error": "'beds' must be an integer"}), 400
 
-    conn = None
-    try:
-        conn = get_db_connection()
-        hospital = conn.execute("SELECT * FROM hospitals WHERE id = ?", (hospital_id,)).fetchone()
-        if not hospital:
-            return jsonify({"error": "Hospital not found"}), 404
+... (truncated: entry point exceeds 300 lines)
+```
 
-        new_beds = min(hospital['available_beds'] + beds_to_add, hospital['total_beds'])
-        conn.execute("UPDATE hospitals SET available_beds = ? WHERE id = ?", (new_beds, hospital_id))
-        conn.commit()
-        socketio.emit('hospital_replenished', {'hospital_id': hospital_id, 'available_beds': new_beds})
-        return jsonify({
-            "hospital_id": hospital_id,
-            "name": hospital['name'],
-            "available_beds": new_beds,
-            "total_beds": hospital['total_beds'],
-            "beds_added": new_beds - hospital['available_beds']
-        }), 200
-    except sqlite3.Error as e:
-        if conn: conn.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if conn: conn.close()
+## SYMBOL_INDEX
 
-@app.route('/api/incidents', methods=['GET'])
-@require_auth
-def get_incidents():
-    try:
-        conn = get_db_connection()
-        rows = conn.execute('SELECT * FROM incidents ORDER BY created_at DESC').fetchall()
-        conn.close()
-        return jsonify([dict(r) for r in rows])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+**`rescue-dashboard/src/components/VictimCard.jsx`**
+- `VictimCard()`
 
-@app.route('/api/incidents', methods=['POST'])
-@require_role('admin')
-def create_incident():
-    try:
-        data = request.json
-        if not data or 'name' not in data:
-            return jsonify({"error": "'name' field is required"}), 400
-        inc_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
-        conn = get_db_connection()
-        conn.execute(
-            'INSERT INTO incidents (id, name, type, lat, lng) VALUES (?, ?, ?, ?, ?)',
-            (inc_id, data['name'], data.get('type', 'general'), data.get('lat', 13.0827), data.get('lng', 80.2707))
-        )
-        conn.commit()
-        conn.close()
-        return jsonify({'incident_id': inc_id}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+**`backend/app.py`**
+- `get_db_connection()`
+- `get_distance()`
+- `match_hospital()`
+- `run_clustering()`
+- `ingest_data()`
+- `get_ambulances()`
+- `update_ambulance_status()`
+- `assign_victim()`
+- `discharge_victim()`
+- `replenish_hospital()`
+- `get_incidents()`
+- `create_incident()`
+- `get_victims()`
+- `get_clusters()`
+- `get_hospitals()`
 
+**`rescue-dashboard/src/App.jsx`**
+- `createIcon()`
+- `IncidentTimeline()`
+- `App()`
 
+**`backend/clustering.py`**
+- `get_distance()`
+- `calculate_hotspots()`
 
-@app.route('/api/victims', methods=['GET'])
-def get_victims():
-    try:
-        page = int(request.args.get('page', 1))
-        limit = min(int(request.args.get('limit', 50)), 200)
-        severity = request.args.get('severity')
-        status = request.args.get('status')
-        incident_id = request.args.get('incident_id')
-        
-        offset = (page - 1) * limit
-        
-        query = 'SELECT * FROM victims WHERE 1=1'
-        count_query = 'SELECT COUNT(*) FROM victims WHERE 1=1'
-        params = []
-        
-        if incident_id:
-            query += ' AND incident_id=?'
-            count_query += ' AND incident_id=?'
-            params.append(incident_id)
-        if severity is not None:
-            query += ' AND triage_level=?'
-            count_query += ' AND triage_level=?'
-            params.append(int(severity))
-        if status:
-            query += ' AND status=?'
-            count_query += ' AND status=?'
-            params.append(status)
-            
-        query += ' ORDER BY triage_level DESC, timestamp ASC LIMIT ? OFFSET ?'
-        params.extend([limit, offset])
-        
-        conn = get_db_connection()
-        victims = conn.execute(query, params).fetchall()
-        total = conn.execute(count_query, params[:-2]).fetchone()[0]
-        conn.close()
-        
-        return jsonify({
-            "victims": [dict(row) for row in victims],
-            "total": total,
-            "page": page,
-            "pages": (total + limit - 1) // limit,
-            "limit": limit
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+**`backend/setup.py`**
+- `seed_data()`
 
-@app.route('/api/clusters', methods=['GET'])
-@require_auth
-def get_clusters():
-    try:
-        incident_id = request.args.get('incident_id')
-        conn = get_db_connection()
-        if incident_id:
-            clusters = conn.execute('SELECT * FROM clusters WHERE incident_id=?', (incident_id,)).fetchall()
-        else:
-            clusters = conn.execute('SELECT * FROM clusters').fetchall()
-        conn.close()
-        return jsonify([dict(row) for row in clusters])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+**`backend/routes/responder_routes.py`**
+- `get_db()`
+- `haversine()`
+- `dashboard()`
+- `optimize_route()`
 
-@app.route('/api/hospitals', methods=['GET'])
-@require_auth
-def get_hospitals():
-    try:
-        conn = get_db_connection()
-        hospitals = [dict(row) for row in conn.execute('SELECT * FROM hospitals').fetchall()]
-        clusters = [dict(row) for row in conn.execute('SELECT lat, lng FROM clusters').fetchall()]
-        conn.close()
-        result = []
-        for h in hospitals:
-            if clusters:
-                min_dist = min(get_distance(h['lat'], h['lng'], c['lat'], c['lng']) for c in clusters)
-                h['eta_minutes'] = round((min_dist / 40) * 60, 1)
-                h['distance_km'] = round(min_dist, 2)
-            else:
-                h['eta_minutes'] = None
-                h['distance_km'] = None
-            result.append(h)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+**`backend/simulator.py`**
+- `login()`
+- `send_victim()`
+- `run_simulator()`
 
-if __name__ == '__main__':
-    print("API starting on http://0.0.0.0:5001")
-    socketio.run(app, debug=False, port=5001, host='0.0.0.0')
+**`backend/auth/jwt_handler.py`**
+- `sign_jwt()`
+- `decode_jwt()`
+
+**`backend/migrations/runner.py`**
+- `run_migrations()`
+
+**`backend/migrations/004_add_discharged_at.py`**
+- `up()`
+
+**`backend/migrations/005_add_confidence.py`**
+- `up()`
+
+**`backend/migrations/002_add_incident_id.py`**
+- `up()`
+
+**`backend/migrations/003_add_ambulances.py`**
+- `up()`
+
+**`backend/migrations/001_initial_schema.py`**
+- `up()`
+
+## IMPORTANT_CALL_PATHS
+
+app.get_db_connection()
+## CORE_MODULES
+
+### `rescue-dashboard/src/components/VictimCard.jsx`
+
+**Purpose:** Implements VictimCard.
+
+**Functions:**
+- `function VictimCard({ victimId })`
+
+### `rescue-dashboard/src/App.jsx`
+
+**Purpose:** Implements App.
+
+**Functions:**
+- `function App()`
+- `const IncidentTimeline = ...`
+- `const createIcon = ...`
+
+**Notes:** large file (1078 lines)
+
+### `backend/clustering.py`
+
+**Purpose:** Implements clustering.
+
+**Functions:**
+- `def calculate_hotspots(incident_id=DEFAULT_INCIDENT_ID)`
+- `def get_distance(lat1, lon1, lat2, lon2)`
+
+### `backend/setup.py`
+
+**Purpose:** Implements setup.
+
+**Functions:**
+- `def seed_data()`
+
+### `rescue-dashboard/src/data/mockData.js`
+
+**Purpose:** Implements mockData.
+
+## SUPPORTING_MODULES
+
+### `backend/routes/responder_routes.py`
+
+```python
+def get_db()
+
+def haversine(lat1, lng1, lat2, lng2)
+    """Straight-line distance in km between two GPS points."""
+
+def dashboard()
+
+def optimize_route()
+    """Greedy nearest-neighbour route from an ambulance's current position
+    through all unassigned victims within radius_km (default 2 km).
+
+    Request body (JSON):
+    {
+      "lat": 13.082,
+      "lng": 80.270,
+      "radius_km": 2.0  # optional
+    }"""
+
+```
+
+### `README.md`
+
+*80 lines, 0 imports*
+
+### `backend/simulator.py`
+
+```python
+def login()
+
+def send_victim(i, wave_count)
+
+def run_simulator()
+
+```
+
+### `backend/auth/jwt_handler.py`
+
+```python
+def sign_jwt(user_id: str, role: str) -> str
+
+def decode_jwt(token: str)
+
+```
+
+### `backend/requirements.txt`
+
+*16 lines, 0 imports*
+
+### `rescue-dashboard/src/index.css`
+
+*92 lines, 0 imports*
+
+### `backend/migrations/runner.py`
+
+```python
+def run_migrations()
+
+```
+
+### `backend/migrations/004_add_discharged_at.py`
+
+```python
+def up(cursor)
+
+```
+
+### `backend/migrations/005_add_confidence.py`
+
+```python
+def up(cursor)
+
+```
+
+### `backend/migrations/002_add_incident_id.py`
+
+```python
+def up(cursor)
+
+```
+
+### `backend/migrations/003_add_ambulances.py`
+
+```python
+def up(cursor)
+
+```
+
+### `backend/migrations/001_initial_schema.py`
+
+```python
+def up(cursor)
+
+```
+
+## DEPENDENCY_GRAPH
+
+```mermaid
+graph LR
+    f0["rescue-dashboard/src/components/VictimCard.jsx"]
+    f1["backend/app.py"]
+    f2["rescue-dashboard/src/App.jsx"]
+    f3["backend/clustering.py"]
+    f4["backend/setup.py"]
+    f5["rescue-dashboard/src/data/mockData.js"]
+    f6["backend/routes/responder_routes.py"]
+    f7["backend/simulator.py"]
+    f8["backend/auth/jwt_handler.py"]
+    f9["backend/requirements.txt"]
+    f10["rescue-dashboard/src/index.css"]
+    f11["backend/migrations/runner.py"]
+    f12["backend/migrations/004_add_discharged_at.py"]
+    f13["backend/migrations/005_add_confidence.py"]
+    f14["backend/migrations/002_add_incident_id.py"]
+    f15["backend/migrations/003_add_ambulances.py"]
+    f16["backend/migrations/001_initial_schema.py"]
+    f17["backend/config.py"]
+    f18["backend/auth/login.py"]
+    f19["backend/auth/profile.py"]
+    f20["backend/auth/register.py"]
+    f21["backend/middleware/role_guard.py"]
+    f22["backend/models/user_model.py"]
+    f23["backend/routes/admin_routes.py"]
+    f24["backend/routes/victim_routes.py"]
+    f2 --> f0
+```
+
+## RANKED_FILES
+
+| File | Score | Tier | Tokens |
+|------|-------|------|--------|
+| `rescue-dashboard/src/components/VictimCard.jsx` | 0.556 | structured summary | 33 |
+| `backend/app.py` | 0.514 | full source | 2734 |
+| `rescue-dashboard/src/App.jsx` | 0.500 | structured summary | 51 |
+| `backend/clustering.py` | 0.242 | structured summary | 49 |
+| `backend/setup.py` | 0.214 | structured summary | 23 |
+| `rescue-dashboard/src/data/mockData.js` | 0.185 | structured summary | 18 |
+| `backend/routes/responder_routes.py` | 0.185 | signatures | 125 |
+| `README.md` | 0.185 | signatures | 13 |
+| `backend/simulator.py` | 0.166 | signatures | 29 |
+| `backend/auth/jwt_handler.py` | 0.156 | signatures | 36 |
+| `backend/requirements.txt` | 0.156 | signatures | 15 |
+| `rescue-dashboard/src/index.css` | 0.156 | signatures | 17 |
+| `backend/migrations/runner.py` | 0.100 | signatures | 19 |
+| `backend/migrations/004_add_discharged_at.py` | 0.100 | signatures | 22 |
+| `backend/migrations/005_add_confidence.py` | 0.100 | signatures | 21 |
+| `backend/migrations/002_add_incident_id.py` | 0.100 | signatures | 22 |
+| `backend/migrations/003_add_ambulances.py` | 0.100 | signatures | 23 |
+| `backend/migrations/001_initial_schema.py` | 0.100 | signatures | 20 |
+| `backend/config.py` | 0.100 | one-liner | 11 |
+| `backend/auth/login.py` | 0.097 | one-liner | 20 |
+| `backend/auth/profile.py` | 0.097 | one-liner | 20 |
+| `backend/auth/register.py` | 0.097 | one-liner | 20 |
+| `backend/middleware/role_guard.py` | 0.097 | one-liner | 23 |
+| `backend/models/user_model.py` | 0.097 | one-liner | 21 |
+| `backend/routes/admin_routes.py` | 0.097 | one-liner | 21 |
+| `backend/routes/victim_routes.py` | 0.097 | one-liner | 22 |
+| `backend/test_auth.py` | 0.097 | one-liner | 20 |
+| `backend/ml_model.py` | 0.029 | one-liner | 20 |
+| `backend/triage_model.txt` | 0.029 | one-liner | 14 |
+| `.gitignore` | 0.029 | one-liner | 10 |
+| `rescue-dashboard/.gitignore` | 0.029 | one-liner | 14 |
+| `rescue-dashboard/README.md` | 0.029 | one-liner | 14 |
+| `rescue-dashboard/eslint.config.js` | 0.029 | one-liner | 19 |
+| `rescue-dashboard/index.html` | 0.029 | one-liner | 13 |
+| `rescue-dashboard/postcss.config.js` | 0.029 | one-liner | 15 |
+| `rescue-dashboard/public/vite.svg` | 0.029 | one-liner | 15 |
+| `rescue-dashboard/src/App.css` | 0.029 | one-liner | 14 |
+| `rescue-dashboard/src/main.jsx` | 0.029 | one-liner | 18 |
+| `rescue-dashboard/tailwind.config.js` | 0.029 | one-liner | 16 |
+| `rescue-dashboard/vite.config.js` | 0.029 | one-liner | 19 |
+
+## PERIPHERY
+
+- `backend/config.py` — 4 lines
+- `backend/auth/login.py` — 1 function, 4 imports, 27 lines
+- `backend/auth/profile.py` — 1 function, 3 imports, 22 lines
+- `backend/auth/register.py` — 1 function, 5 imports, 41 lines
+- `backend/middleware/role_guard.py` — 2 functions, 3 imports, 59 lines
+- `backend/models/user_model.py` — 4 functions, 3 imports, 37 lines
+- `backend/routes/admin_routes.py` — 1 function, 2 imports, 15 lines
+- `backend/routes/victim_routes.py` — 2 functions, 5 imports, 45 lines
+- `backend/test_auth.py` — 1 class, 4 imports, 64 lines
+- `backend/ml_model.py` — 1 function, 2 imports, 19 lines
+- `backend/triage_model.txt` — 38145 lines
+- `.gitignore` — 32 lines
+- `rescue-dashboard/.gitignore` — 25 lines
+- `rescue-dashboard/README.md` — 17 lines
+- `rescue-dashboard/eslint.config.js` — 5 imports, 30 lines
+- `rescue-dashboard/index.html` — 14 lines
+- `rescue-dashboard/postcss.config.js` — 6 lines
+- `rescue-dashboard/public/vite.svg` — 1 lines
+- `rescue-dashboard/src/App.css` — 43 lines
+- `rescue-dashboard/src/main.jsx` — 4 imports, 11 lines
+- `rescue-dashboard/tailwind.config.js` — 11 lines
+- `rescue-dashboard/vite.config.js` — 2 imports, 11 lines
+

@@ -3,9 +3,7 @@ import numpy as np
 import os
 from sklearn.cluster import DBSCAN
 from math import radians, cos, sin, asin, sqrt
-
-# Absolute path ensures this works regardless of working directory
-DB_PATH = os.path.join(os.path.dirname(__file__), 'triage.db')
+from config import DB_PATH, DEFAULT_INCIDENT_ID
 
 def get_distance(lat1, lon1, lat2, lon2):
     R = 6371.0  # Kilometers
@@ -14,7 +12,7 @@ def get_distance(lat1, lon1, lat2, lon2):
     a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
     return R * 2 * asin(sqrt(a)) * 1000  # Return in meters
 
-def calculate_hotspots(incident_id='INC-001'):
+def calculate_hotspots(incident_id=DEFAULT_INCIDENT_ID):
     conn = sqlite3.connect(DB_PATH, timeout=30)
     try:
         cursor = conn.cursor()

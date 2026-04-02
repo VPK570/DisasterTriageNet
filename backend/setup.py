@@ -1,105 +1,35 @@
-import sqlite3
 import os
+import sys
 
-DB_PATH = 'triage.db'
+sys.path.append(os.path.dirname(__file__))
+from config import DB_PATH, DEFAULT_INCIDENT_ID, DEFAULT_INCIDENT_NAME
+from migrations.runner import run_migrations
+import sqlite3
 
-def init_db():
-    # Remove existing database to ensure a clean slate
-    if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
-        print("🗑️ Existing database removed.")
-
+def seed_data():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # 1. Incidents Table
-    cursor.execute('''
-        CREATE TABLE incidents (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            type TEXT,
-            status TEXT DEFAULT 'active',
-            lat REAL,
-            lng REAL,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    ''')
-
     # Seed a default incident
-    cursor.execute('''
-        INSERT INTO incidents (id, name, type, lat, lng)
-        VALUES ('INC-001', 'Chennai Flood 2026', 'flood', 13.0827, 80.2707)
+    cursor.execute(f'''
+        INSERT OR IGNORE INTO incidents (id, name, type, lat, lng)
+        VALUES ('{DEFAULT_INCIDENT_ID}', '{DEFAULT_INCIDENT_NAME}', 'flood', 13.0827, 80.2707)
     ''')
 
-    # 2. Victims Table: Stores patient vitals and ML triage results
-    cursor.execute('''
-        CREATE TABLE victims (
-            id TEXT PRIMARY KEY, 
-            age INTEGER, 
-            heart_rate REAL, 
-            spo2 REAL, 
-            temperature REAL, 
-            triage_level INTEGER,
-            lat REAL, 
-            lng REAL, 
-            timestamp TEXT, 
-            status TEXT,
-            hospital_assigned TEXT,
-            incident_id TEXT DEFAULT 'INC-001',
-            FOREIGN KEY (incident_id) REFERENCES incidents(id)
-        )
-    ''')
+    # Seed system accounts
+    import bcrypt
+    import uuid
+    from datetime import datetime, timezone
 
-    # 2. Clusters Table: Stores DBSCAN results for the heatmap circles
-    cursor.execute('''
-        CREATE TABLE clusters (
-            id INTEGER PRIMARY KEY,
-            lat REAL,
-            lng REAL,
-            count INTEGER,
-            avg_severity REAL,
-            radius REAL,
-            incident_id TEXT DEFAULT 'INC-001',
-            FOREIGN KEY (incident_id) REFERENCES incidents(id)
-        )
-    ''')
+    system_users = [
+        (str(uuid.uuid4()), "Simulator Bot", "simulator@disaster.net", bcrypt.hashpw("simulator123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'), "responder", datetime.now(timezone.utc).isoformat()),
+        (str(uuid.uuid4()), "System Admin", "admin@disaster.net", bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'), "admin", datetime.now(timezone.utc).isoformat())
+    ]
 
-    # 3. Hospitals Table: Stores locations and bed availability
-    cursor.execute('''
-        CREATE TABLE hospitals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT, 
-            lat REAL, 
-            lng REAL, 
-            total_beds INTEGER, 
-            available_beds INTEGER, 
-            specialty TEXT
-        )
-    ''')
-
-    # 4. Users Table: Stores registered users (victims, responders, admin)
-    cursor.execute('''
-        CREATE TABLE users (
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            email TEXT UNIQUE,
-            password_hash TEXT,
-            role TEXT,
-            created_at TEXT
-        )
-    ''')
-
-    # 5. Ambulances Table: Tracks field responder units and their status
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS ambulances (
-            id TEXT PRIMARY KEY,
-            status TEXT DEFAULT 'available',
-            location TEXT,
-            lat REAL,
-            lng REAL,
-            assigned_victim TEXT DEFAULT NULL
-        )
-    ''')
+    cursor.executemany('''
+        INSERT OR IGNORE INTO users (id, name, email, password_hash, role, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', system_users)
 
     # Seed Data: Real Chennai Hospitals
     hospitals = [
@@ -121,13 +51,27 @@ def init_db():
         ("AMB-02", "busy",      "T. Nagar", 13.0418, 80.2341, None),
     ]
     cursor.executemany('''
-        INSERT INTO ambulances (id, status, location, lat, lng, assigned_victim)
+        INSERT OR IGNORE INTO ambulances (id, status, location, lat, lng, assigned_victim)
         VALUES (?, ?, ?, ?, ?, ?)
     ''', ambulances)
 
     conn.commit()
     conn.close()
-    print("Database 'triage.db' initialized with hospitals and ambulances.")
+    print("Database 'triage.db' initialized and seeded with default data.")
 
-if __name__ == "__main__":
-    init_db()
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == '--fresh':
+        confirm = input("⚠️ WARNING: This will drop all tables and completely permanently erase all data. Proceed? [y/N]: ")
+        if confirm.lower() == 'y':
+            print("Running fresh install...")
+            if os.path.exists(DB_PATH):
+                os.remove(DB_PATH)
+                print("🗑️ Existing database removed.")
+            run_migrations()
+            seed_data()
+            print("✅ Fresh database created and seeded.")
+        else:
+            print("Aborted.")
+    else:
+        print("Running standard db migrations...")
+        run_migrations()

@@ -2,76 +2,34 @@
 
 DisasterTriageNet is an AI-powered emergency management system designed to optimize disaster response. It combines real-time victim health telemetry, machine learning-based triage scoring, and geospatial clustering to coordinate medical resources efficiently during mass-casualty events.
 
-## 🔥 Key Features
-
-- **🧠 AI Triage Scoring**: Predicts medical severity (Low to Critical) based on age, heart rate, $SpO_2$, and temperature using a LightGBM model.
-- **📍 Geospatial Hotspots**: Dynamic DBSCAN clustering of victims to identify major incident zones and optimize hospital routing.
-- **⚡ Real-Time Coordination**: Instant dashboard updates via **Socket.io** for victim ingestion, hospital bed status, and emergency alerts.
-- **📅 Incident Management**: Multi-incident support allows commanders to manage separate disaster episodes (e.g., floods, fires) from a single interface.
-- **🚗 ETA Estimator**: Real-time calculation of ambulance arrival times to hospitals based on geospatial data and traffic models.
-- **📈 Incident Timeline**: Visual arrival tracker to monitor the flow of victims and severity trends.
-- **📱 Field QR Access**: Generates unique QR codes for victims that field responders can scan to access patient details on mobile.
-
----
-
-## 🏗️ Project Structure
-
-```bash
-DisasterTriageNet/
-├── backend/            # Flask API, ML Models, and Database
-│   ├── auth/           # JWT & Role-Based Access Control
-│   ├── routes/         # Feature-specific API endpoints
-│   ├── ml_model.py     # Triage prediction logic
-│   └── simulator.py    # Emergency load testing tool
-└── rescue-dashboard/   # React/Vite Frontend
-    └── src/
-        ├── components/ # Reusable UI components
-        └── App.jsx     # Main Command Dashboard
-```
-
 ---
 
 ## 🚀 Getting Started
 
-### 1. Backend Setup (Flask)
-The backend uses **Python 3.13** and is optimized for stability with `eventlet`.
-```bash
-cd backend
-# Create and activate environment
-python -m venv venv
-source venv/bin/activate  # Mac/Linux
-# Install pinned, verified dependencies
-pip install -r requirements.txt
-# Initialize Database (clean slate)
-python setup.py
-# Start Server
-python app.py
-```
+**We've recently overhauled the project documentation!** 
+For complete instructions on setting up your development environment, initializing the database, and running the real-time simulation, please refer to our new guide:
 
-### 2. Frontend Setup (React 19)
-The dashboard is built with **Vite** and **React 19**, featuring a high-end "Command Center" UI.
-```bash
-cd rescue-dashboard
-npm install
-npm run dev
-```
+👉 **[View the Professional Setup Guide](./SETUP.md)**
 
-### 3. Run Simulation
-To populate the premium dashboard with real-time waves of patients:
-```bash
-cd backend
-source venv/bin/activate
-python simulator.py
-```
+---
+
+## 🔥 Key Features
+
+- **🧠 AI Triage Scoring**: Predicts medical severity (Low to Critical) using a LightGBM model.
+- **📍 Geospatial Hotspots**: Dynamic DBSCAN clustering of victims to identify major incident zones.
+- **⚡ Real-Time Coordination**: Instant dashboard updates via **Socket.io** for victim ingestion and hospital bed status.
+- **📅 Incident Management**: Multi-incident support to manage separate disaster episodes.
+- **🚗 ETA Estimator**: Real-time calculation of ambulance arrival times to hospitals.
+- **📱 Field QR Access**: Generates unique QR codes for victims for scanning by field responders.
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: React 19, Vite, Leaflet (Map), Recharts (Analytics), Tailwind CSS, Socket.io-client.
+- **Frontend**: React 19, Vite, Leaflet, Recharts, Tailwind CSS, Socket.io-client.
 - **Backend**: Python 3.13, Flask, Flask-SocketIO, SQLite, Scikit-learn, LightGBM.
 - **Communication**: WebSockets (Real-time), REST API (State management).
-- **Security**: JWT Authentication, Bcrypt password hashing, Role-Based Access (Admin/Responder).
+- **Security**: JWT Authentication, Bcrypt password hashing, Role-Based Access Control.
 
 ---
 

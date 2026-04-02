@@ -2,11 +2,37 @@ import requests
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from config import DEFAULT_INCIDENT_ID
 
 API_URL = "http://127.0.0.1:5001/api/ingest"
+LOGIN_URL = "http://127.0.0.1:5001/api/auth/login"
 TIMEOUT = 30  # increased since clustering can be slow
 
+# Session-wide auth token
+auth_token = None
+
+def login():
+    global auth_token
+    print("🔑 Authenticating simulator...")
+    try:
+        payload = {
+            "email": "simulator@disaster.net",
+            "password": "simulator123"
+        }
+        response = requests.post(LOGIN_URL, json=payload, timeout=5)
+        if response.ok:
+            data = response.json()
+            auth_token = data.get("access_token")
+            print("✅ Login successful.")
+        else:
+            print(f"❌ Login failed ({response.status_code}): {response.text}")
+            exit(1)
+    except Exception as e:
+        print(f"❌ Connection error during login: {e}")
+        exit(1)
+
 def send_victim(i, wave_count):
+    global auth_token
     age = random.randint(1, 90)
     if random.random() > 0.85:
         hr    = random.uniform(120, 160)
@@ -24,10 +50,15 @@ def send_victim(i, wave_count):
         "temperature":round(temp, 1),
         "lat": 13.0827 + random.uniform(-0.06, 0.06),
         "lng": 80.2707 + random.uniform(-0.06, 0.06),
+        "incident_id": DEFAULT_INCIDENT_ID
+    }
+
+    headers = {
+        "Authorization": f"Bearer {auth_token}"
     }
 
     try:
-        response = requests.post(API_URL, json=payload, timeout=TIMEOUT)
+        response = requests.post(API_URL, json=payload, headers=headers, timeout=TIMEOUT)
         if response.ok:
             result = response.json()
             sev  = result.get('predicted_severity', 'N/A')
@@ -41,6 +72,7 @@ def send_victim(i, wave_count):
         return f"  🔌 Victim {i+1}: Connection refused — is Flask running on port 5001?"
 
 def run_simulator():
+    login()
     print("🚀 Chennai AI Triage Simulator Started...")
     print(f"📡 Target: {API_URL}")
     print("-" * 57)

@@ -13,13 +13,21 @@ export default function VictimCard({ victimId }) {
     const [error, setError] = useState(null);
 
     useEffect(() => {
-        fetch("http://localhost:5001/api/victims")
-            .then(r => r.json())
-            .then(data => {
-                const found = data.find(v => v.id === victimId);
-                found ? setVictim(found) : setError("Victim ID Not Found");
-            })
-            .catch(() => setError("Network Interface Error"));
+        const fetchVictim = () => {
+            fetch("http://localhost:5001/api/victims?limit=200")
+                .then(r => r.json())
+                .then(data => {
+                    const pool = data.victims || data; // handle paginated wrapper if it exists
+                    const found = pool.find(v => v.id === victimId);
+                    found ? setVictim(found) : setError("Victim ID Not Found");
+                })
+                .catch(() => setError("Network Interface Error"));
+        };
+
+        fetchVictim(); // initial fetch
+        const interval = setInterval(fetchVictim, 10000); // 10s auto-refresh
+
+        return () => clearInterval(interval);
     }, [victimId]);
 
     if (error) return <div className="min-h-screen bg-slate-950 p-8 flex items-center justify-center"><div className="glass-card p-6 rounded-2xl text-red-400 font-bold uppercase tracking-widest text-center border-red-500/50">{error}</div></div>;

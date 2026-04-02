@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from "socket.io-client";
 import { MapContainer, TileLayer, Marker, Popup, Circle, Tooltip, Polyline, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
@@ -6,10 +6,18 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTo
 import { HeatmapLayer } from 'react-leaflet-heatmap-layer-v3';
 import VictimCard from './components/VictimCard';
 import 'leaflet/dist/leaflet.css';
-import { AlertTriangle, Activity, MapPin, Truck, Hospital, QrCode } from 'lucide-react';
+import {
+  AlertTriangle, Activity, MapPin, Truck, Hospital, QrCode,
+  Users,
+  AlertOctagon,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  Lock
+} from "lucide-react";
 
 // --- CONFIGURATION & ICONS ---
-const API_BASE_URL = 'http://localhost:5001/api';
+const API_BASE_URL = "http://127.0.0.1:5001/api";
 
 const severityColors = {
   0: '#22c55e', // Low - Green
@@ -87,7 +95,35 @@ const IncidentTimeline = ({ victims, colors }) => {
 };
 
 export default function App() {
+  const [token, setToken] = useState(localStorage.getItem("token"));
+  const [userRole, setUserRole] = useState(localStorage.getItem("userRole") || 'admin');
+
+  const apiFetch = async (url, options = {}) => {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      }
+    });
+
+    if (res.status === 401) {
+      alert(`API 401 Unauthorized on: ${url}. Logging out.`);
+      setToken(null);
+      setUserRole(null);
+      localStorage.removeItem("token");
+      localStorage.removeItem("userRole");
+    }
+
+    return res;
+  };
+
   const [victims, setVictims] = useState([]);
+  const [mapVictims, setMapVictims] = useState([]);
+  const [victimsMeta, setVictimsMeta] = useState({ total: 0, page: 1, pages: 1, limit: 50 });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [filterSeverity, setFilterSeverity] = useState(null);
   const [clusters, setClusters] = useState([]);
   const [hospitals, setHospitals] = useState([]);
   const [ambulances, setAmbulances] = useState([]);
@@ -95,11 +131,70 @@ export default function App() {
   const [muted, setMuted] = useState(false);
   const [qrData, setQrData] = useState({});
   const [incidents, setIncidents] = useState([]);
-  const [activeIncident, setActiveIncident] = useState("INC-001");
+  const [activeIncident, setActiveIncident] = useState(null);
   const [activeRoute, setActiveRoute] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [selectedAmbulance, setSelectedAmbulance] = useState(null);
   const prevVictimIdsRef = useRef(new Set());
+
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [registerName, setRegisterName] = useState("");
+  const [registerRole, setRegisterRole] = useState("responder");
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginError("");
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setToken(data.access_token);
+        setUserRole(data.role);
+        localStorage.setItem("token", data.access_token);
+        localStorage.setItem("userRole", data.role);
+        alert("Login success! Dashboard loading...");
+      } else {
+        setLoginError(data.error || "Login failed");
+        alert(`Login Failed: ${data.error}`);
+      }
+    } catch (err) {
+      setLoginError("Connection refused");
+      alert("Login Connection Refused");
+    }
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setLoginError("");
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: registerName,
+          email: loginEmail,
+          password: loginPassword,
+          role: registerRole
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        // Automatically log them in by triggering the login flow
+        await handleLogin(e);
+      } else {
+        setLoginError(data.error || "Registration failed");
+      }
+    } catch (err) {
+      setLoginError("Connection refused");
+    }
+  };
 
   const playAlertTone = () => {
     try {
@@ -121,53 +216,80 @@ export default function App() {
     }
   };
 
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
     try {
-      const [vRes, cRes, hRes, iRes, aRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/victims?incident_id=${activeIncident}`),
-        fetch(`${API_BASE_URL}/clusters?incident_id=${activeIncident}`),
-        fetch(`${API_BASE_URL}/hospitals`),
-        fetch(`${API_BASE_URL}/incidents`),
-        fetch(`${API_BASE_URL}/ambulances`),
+      setLoading(true);
+
+      const severityParam = filterSeverity !== null ? `&severity=${filterSeverity}` : "";
+
+      const [vRes, mapVRes, cRes, hRes, aRes, incRes] = await Promise.all([
+        apiFetch(`${API_BASE_URL}/victims?page=${currentPage}&limit=${victimsMeta.limit}${severityParam}&incident_id=${activeIncident}`),
+        apiFetch(`${API_BASE_URL}/victims?limit=200&incident_id=${activeIncident}`),
+        apiFetch(`${API_BASE_URL}/clusters?incident_id=${activeIncident}`),
+        apiFetch(`${API_BASE_URL}/hospitals`),
+        apiFetch(`${API_BASE_URL}/ambulances`),
+        apiFetch(`${API_BASE_URL}/incidents`)
       ]);
 
-      const vData = await vRes.json();
-      const mappedVictims = vData.map(v => ({ ...v, severity: v.triage_level }));
+      if (vRes.ok && mapVRes.ok && cRes.ok && hRes.ok && aRes.ok && incRes.ok) {
+        const [vData, mapVData, cData, hData, aData, incData] = await Promise.all([
+          vRes.json(),
+          mapVRes.json(),
+          cRes.json(),
+          hRes.json(),
+          aRes.json(),
+          incRes.json()
+        ]);
 
-      if (iRes.ok) setIncidents(await iRes.json());
-      if (aRes.ok) setAmbulances(await aRes.json());
-
-      const newCritical = mappedVictims.filter(
-        v => v.triage_level === 3 && !prevVictimIdsRef.current.has(v.id)
-      );
-      if (!muted && newCritical.length > 0) playAlertTone();
-      prevVictimIdsRef.current = new Set(mappedVictims.map(v => v.id));
-
-      setVictims(mappedVictims);
-      if (cRes.ok) setClusters(await cRes.json());
-      if (hRes.ok) setHospitals(await hRes.json());
+        setVictims(vData.victims.map(v => ({ ...v, severity: v.triage_level })));
+        setVictimsMeta({
+          total: vData.total,
+          page: vData.page,
+          pages: vData.pages,
+          limit: vData.limit
+        });
+        setMapVictims(mapVData.victims.map(v => ({ ...v, severity: v.triage_level })));
+        setClusters(cData);
+        setHospitals(hData);
+        setAmbulances(aData);
+        setIncidents(incData);
+      }
+    } catch (error) {
+      console.error("Fetch all failed:", error);
+    } finally {
       setLoading(false);
-    } catch (err) {
-      console.error("Dashboard Sync Error:", err);
     }
-  };
+  }, [activeIncident, currentPage, filterSeverity, victimsMeta.limit, apiFetch]);
 
   // Feature 2: WebSocket Real-Time Push
   useEffect(() => {
+    if (!token || !activeIncident) return; // Do not fetch or connect sockets without a token and an incident
+
     fetchAll(); // Initial load
 
     const socket = io(API_BASE_URL.replace('/api', ''));
 
-    socket.on("victim_ingested", (newVictim) => {
-      if (newVictim.incident_id === activeIncident) {
-        fetchAll();
-        if (newVictim.triage_level === 3) {
-          if (!muted) playAlertTone();
+    socket.on("victim_ingested", (victim) => {
+      // Prepend to sidebar if filters match
+      if (victim.incident_id === activeIncident) {
+        const enrichedVictim = { ...victim, severity: victim.triage_level };
+        const matchesSeverity = filterSeverity === null || enrichedVictim.triage_level === parseInt(filterSeverity);
+        if (matchesSeverity) {
+          setVictims(prev => [enrichedVictim, ...prev].slice(0, victimsMeta.limit));
+          setVictimsMeta(prev => ({ ...prev, total: prev.total + 1 }));
+        }
+
+        // Always add to map
+        setMapVictims(prev => [enrichedVictim, ...prev].slice(0, 200));
+
+        if (!muted) playAlertTone();
+
+        if (victim.triage_level === 3) {
           if ("Notification" in window && Notification.permission === "granted") {
             new Notification("🚨 CRITICAL VICTIM ARRIVING", {
-              body: `Victim ${newVictim.id} — assigned to ${newVictim.hospital_assigned || "unassigned"}`,
+              body: `Victim ${victim.id} — assigned to ${victim.hospital_assigned || "unassigned"}`,
               icon: "/vite.svg",
-              tag: newVictim.id,
+              tag: victim.id,
               requireInteraction: true,
             });
           }
@@ -177,15 +299,14 @@ export default function App() {
 
     socket.on("clusters_updated", (data) => {
       if (data.incident_id === activeIncident) {
-        fetchAll();
+        // No full fetchAll needed, clusters will be updated on next poll or specific handler
       }
     });
 
     // Immediately remove dispatched victims from the feed without a full refresh
-    socket.on("victim_assigned", ({ victim_id }) => {
-      setVictims(prev => prev.map(v =>
-        v.id === victim_id ? { ...v, status: 'assigned' } : v
-      ));
+    socket.on("victim_assigned", ({ victim_id, ambulance_id }) => {
+      setVictims(prev => prev.map(v => v.id === victim_id ? { ...v, status: 'assigned' } : v));
+      setMapVictims(prev => prev.map(v => v.id === victim_id ? { ...v, status: 'assigned' } : v));
     });
 
     // Update ambulance status in real-time without a full refresh
@@ -195,14 +316,46 @@ export default function App() {
       ));
     });
 
+    socket.on("victim_discharged", ({ victim_id, hospital }) => {
+      setVictims(prev => prev.map(v =>
+        v.id === victim_id ? { ...v, status: 'discharged' } : v
+      ));
+      if (hospital) {
+        setHospitals(prev => prev.map(h =>
+          h.id === hospital.id ? { ...h, available_beds: hospital.available_beds } : h
+        ));
+      }
+    });
+
+    socket.on("hospital_replenished", ({ hospital_id, available_beds }) => {
+      setHospitals(prev => prev.map(h =>
+        h.id === hospital_id ? { ...h, available_beds } : h
+      ));
+    });
+
     return () => socket.disconnect();
-  }, [muted, activeIncident]);
+  }, [muted, activeIncident, token]);
 
   // Fallback 30-second poll
   useEffect(() => {
+    if (!token || !activeIncident) return;
     const fallback = setInterval(fetchAll, 30000);
     return () => clearInterval(fallback);
-  }, []);
+  }, [token, activeIncident]);
+
+  // Fetch Incidents on mount and login
+  useEffect(() => {
+    if (!token) return;
+    apiFetch(`${API_BASE_URL}/incidents`)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        setIncidents(data);
+        if (data && data.length > 0 && !activeIncident) {
+          setActiveIncident(data[0].id);
+        }
+      })
+      .catch(console.error);
+  }, [token, activeIncident]); // Added activeIncident to dependencies to avoid warnings
 
   // Feature 3: On mount
   useEffect(() => {
@@ -213,12 +366,77 @@ export default function App() {
 
   const handleAssign = async (victimId) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/assign/${victimId}`, { method: 'POST' });
-      if (response.ok) {
-        setVictims(prev => prev.map(v => v.id === victimId ? { ...v, status: 'assigned' } : v));
+      // Optimistic update
+      setVictims(prev => prev.map(v => v.id === victimId ? { ...v, status: 'assigned' } : v));
+
+      const res = await apiFetch(`${API_BASE_URL}/assign/${victimId}`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        // Rollback
+        setVictims(prev => prev.map(v => v.id === victimId ? { ...v, status: 'unassigned' } : v));
+        alert(data.error || "Dispatch failed");
       }
     } catch (error) {
-      console.error("Assignment failed:", error);
+      console.error("Assign failed:", error);
+    }
+  };
+
+  const handleDischarge = async (victimId, hospitalName) => {
+    const originalVictims = [...victims];
+    const originalHospitals = [...hospitals];
+
+    try {
+      // Optimistic update
+      setVictims(prev => prev.map(v => v.id === victimId ? { ...v, status: 'discharged' } : v));
+      if (hospitalName && hospitalName !== 'Waitlisted') {
+        setHospitals(prev => prev.map(h => {
+          if (h.name === hospitalName) {
+            return { ...h, available_beds: Math.min(h.available_beds + 1, h.total_beds) };
+          }
+          return h;
+        }));
+      }
+
+      const res = await apiFetch(`${API_BASE_URL}/victims/${victimId}/discharge`, { method: "PATCH" });
+      if (!res.ok) {
+        const data = await res.json();
+        // Rollback
+        setVictims(originalVictims);
+        setHospitals(originalHospitals);
+        alert(data.error || "Discharge failed");
+      }
+    } catch (error) {
+      console.error("Discharge failed:", error);
+      setVictims(originalVictims);
+      setHospitals(originalHospitals);
+    }
+  };
+
+  const handleReplenish = async (hospitalId, beds) => {
+    const originalHospitals = [...hospitals];
+    try {
+      // Optimistic update
+      setHospitals(prev => prev.map(h => {
+        if (h.id === hospitalId) {
+          return { ...h, available_beds: Math.min(h.available_beds + parseInt(beds), h.total_beds) };
+        }
+        return h;
+      }));
+
+      const res = await apiFetch(`${API_BASE_URL}/hospitals/${hospitalId}/replenish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ beds })
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setHospitals(originalHospitals);
+        alert(data.error || "Replenish failed");
+      }
+    } catch (error) {
+      console.error("Replenish failed:", error);
+      setHospitals(originalHospitals);
     }
   };
 
@@ -226,7 +444,7 @@ export default function App() {
     setRouteLoading(true);
     setSelectedAmbulance(ambulance.id);
     try {
-      const res = await fetch(`${API_BASE_URL}/responder/route`, {
+      const res = await apiFetch(`${API_BASE_URL}/responder/route`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -265,12 +483,17 @@ export default function App() {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE_URL}/victims/${victimId}/qr`);
-      const data = await res.json();
-      if (data.qr_base64) {
-        setQrData(d => ({ ...d, [victimId]: data.qr_base64 }));
+      const res = await apiFetch(`${API_BASE_URL}/victims/${victimId}/qr`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.qr_base64) {
+          setQrData(d => ({ ...d, [victimId]: data.qr_base64 }));
+        } else {
+          console.error("QR generation failed:", data.error);
+        }
       } else {
-        console.error("QR generation failed:", data.error);
+        const errorData = await res.json();
+        console.error("QR Fetch failed:", errorData.error || res.statusText);
       }
     } catch (err) {
       console.error("QR Fetch Error:", err);
@@ -279,7 +502,7 @@ export default function App() {
 
   // --- ROUTING ---
   const path = window.location.pathname;
-  const victimMatch = path.match(/^\/victim\/(V-\d+)$/);
+  const victimMatch = path.match(/^\/victim\/(V-[a-zA-Z0-9]+)$/);
   if (victimMatch) {
     return <VictimCard victimId={victimMatch[1]} />;
   }
@@ -290,6 +513,108 @@ export default function App() {
     { name: 'High', value: victims.filter(v => v.severity === 2).length, color: severityColors[2] },
     { name: 'Critical', value: victims.filter(v => v.severity === 3).length, color: severityColors[3] },
   ];
+
+  if (!token) {
+    return (
+      <div className="h-screen w-full bg-slate-950 flex items-center justify-center p-4">
+        <div className="w-full max-w-sm glass-panel p-8 rounded-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500" />
+          <div className="flex flex-col items-center mb-8">
+            <div className="w-16 h-16 rounded-full glass-card flex items-center justify-center mb-4">
+              <Lock className="text-blue-400" size={32} />
+            </div>
+            <h1 className="text-2xl font-black text-slate-100 tracking-wider">SECURE ACCESS</h1>
+            <p className="text-xs text-slate-500 uppercase tracking-widest mt-2">Disaster Triage Network</p>
+          </div>
+
+          <div className="flex bg-slate-900 border border-slate-700/50 rounded-lg p-1 mb-6">
+            <button
+              onClick={() => { setIsRegistering(false); setLoginError(""); }}
+              className={`flex-1 text-[10px] font-bold uppercase tracking-widest py-2 rounded-md transition-all ${!isRegistering ? 'bg-slate-800 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              Login
+            </button>
+            <button
+              onClick={() => { setIsRegistering(true); setLoginError(""); }}
+              className={`flex-1 text-[10px] font-bold uppercase tracking-widest py-2 rounded-md transition-all ${isRegistering ? 'bg-slate-800 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              Register
+            </button>
+          </div>
+
+          <form onSubmit={isRegistering ? handleRegister : handleLogin} className="space-y-4">
+            {isRegistering && (
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Full Name</label>
+                <input
+                  type="text"
+                  value={registerName}
+                  onChange={(e) => setRegisterName(e.target.value)}
+                  className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-colors"
+                  placeholder="John Doe"
+                  required
+                />
+              </div>
+            )}
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Email / Responder ID</label>
+              <input
+                type="email"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-colors"
+                placeholder={isRegistering ? "john@disaster.net" : "admin@disaster.net"}
+                required
+              />
+            </div>
+            {isRegistering && (
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Role Assignment</label>
+                <select
+                  value={registerRole}
+                  onChange={(e) => setRegisterRole(e.target.value)}
+                  className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-colors appearance-none"
+                >
+                  <option value="responder">Field Responder</option>
+                  <option value="admin">Command Admin</option>
+                  <option value="victim">Civilian Victim</option>
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Passcode</label>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-colors"
+                placeholder="••••••••"
+                required
+              />
+            </div>
+
+            {loginError && (
+              <p className="text-red-400 text-[10px] font-bold uppercase tracking-widest text-center py-2">{loginError}</p>
+            )}
+
+            <button
+              type="submit"
+              className={`w-full text-white font-black py-4 rounded-xl shadow-lg transition-all uppercase tracking-widest mt-4 ${isRegistering ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-500/20' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20'}`}
+            >
+              {isRegistering ? "Create Clearance" : "Authenticate & Enter"}
+            </button>
+
+            {!isRegistering && (
+              <div className="mt-6 text-center">
+                <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">Default Credentials:</p>
+                <p className="text-[10px] text-slate-500 mt-1">Admin: admin@disaster.net / admin123</p>
+              </div>
+            )}
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-full bg-slate-950 text-slate-200 flex flex-col font-sans overflow-hidden bg-radial-at-tl from-slate-900 via-slate-950 to-slate-950">
@@ -381,6 +706,27 @@ export default function App() {
                       <span className="text-slate-500 uppercase">{h.available_beds} FREE</span>
                       <span className="text-blue-400">{Math.round((h.available_beds / h.total_beds) * 100)}%</span>
                     </div>
+
+                    {userRole === 'admin' && h.available_beds === 0 && (
+                      <div className="mt-3 pt-3 border-t border-slate-700/30 flex gap-2">
+                        <input
+                          type="number"
+                          placeholder="Beds"
+                          className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] w-16 text-white focus:outline-none focus:border-blue-500"
+                          id={`replenish-input-${h.id}`}
+                          defaultValue="5"
+                        />
+                        <button
+                          onClick={() => {
+                            const val = document.getElementById(`replenish-input-${h.id}`).value;
+                            handleReplenish(h.id, val);
+                          }}
+                          className="bg-blue-600 hover:bg-blue-500 text-white text-[9px] px-3 py-1 rounded font-black uppercase tracking-tighter transition-all"
+                        >
+                          Replenish
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))
               )}
@@ -595,7 +941,38 @@ export default function App() {
 
         {/* RIGHT SIDEBAR - PRIORITY LIST */}
         <aside className="w-80 glass-panel border-l p-6 flex flex-col shrink-0 z-10 overflow-hidden">
-          <h2 className="text-[10px] uppercase text-slate-500 font-black mb-6 tracking-[0.2em]">Incident Response Feed</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[10px] uppercase text-slate-500 font-black tracking-[0.2em]">Incident Response Feed</h2>
+            <Filter size={14} className="text-slate-500" />
+          </div>
+
+          <div className="flex gap-2 mb-4 overflow-x-auto pb-2 custom-scrollbar shrink-0">
+            <button
+              onClick={() => { setFilterSeverity(null); setCurrentPage(1); }}
+              className={`px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-full whitespace-nowrap transition-all ${filterSeverity === null ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => { setFilterSeverity(3); setCurrentPage(1); }}
+              className={`px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-full whitespace-nowrap transition-all ${filterSeverity === 3 ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+            >
+              Critical
+            </button>
+            <button
+              onClick={() => { setFilterSeverity(2); setCurrentPage(1); }}
+              className={`px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-full whitespace-nowrap transition-all ${filterSeverity === 2 ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+            >
+              High
+            </button>
+            <button
+              onClick={() => { setFilterSeverity(1); setCurrentPage(1); }}
+              className={`px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-full whitespace-nowrap transition-all ${filterSeverity === 1 ? 'bg-yellow-500 text-white shadow-lg shadow-yellow-500/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+            >
+              Mod
+            </button>
+          </div>
+
           <div className="flex-1 overflow-y-auto space-y-4 pr-1 custom-scrollbar">
             {loading ? (
               [1, 2, 3, 4].map(i => (
@@ -603,10 +980,10 @@ export default function App() {
               ))
             ) : (
               victims
-                .filter(v => v.status !== 'assigned')
+                .filter(v => v.status !== 'discharged')
                 .sort((a, b) => b.severity - a.severity)
                 .map(v => (
-                  <div key={v.id} className={`p-4 rounded-2xl glass-card relative overflow-hidden group ${v.severity === 3 ? 'border-red-500/30' : ''}`}>
+                  <div key={v.id} className={`p-4 rounded-2xl glass-card relative overflow-hidden group ${v.severity === 3 ? 'border-red-500/30' : ''} ${v.status === 'assigned' ? 'opacity-75' : ''}`}>
                     {v.severity === 3 && <div className="absolute top-0 left-0 w-1.5 h-full bg-red-500/80 shadow-[0_0_15px_rgba(239,68,68,0.5)]" />}
 
                     <div className="flex justify-between items-start mb-3">
@@ -614,9 +991,17 @@ export default function App() {
                         <span className="font-black text-slate-100 text-xs tabular-nums tracking-wider uppercase">{v.id}</span>
                         <span className="text-[8px] text-slate-500 font-bold uppercase mt-0.5">Reported Vitals</span>
                       </div>
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${v.severity === 3 ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-slate-700 text-slate-300'}`}>
-                        {v.severity === 3 ? 'Critical' : v.severity === 2 ? 'High' : 'Stable'}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {v.status === 'assigned' && (
+                          <span className="text-[8px] px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded-md font-bold uppercase">Dispatched</span>
+                        )}
+                        <button onClick={() => fetchQr(v.id)} className="p-1 px-1.5 bg-slate-800 rounded hover:bg-slate-700 text-slate-300 transition-colors" title="Mobile Triage Card">
+                          <QrCode size={12} />
+                        </button>
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${v.severity === 3 ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-slate-700 text-slate-300'}`}>
+                          {v.severity === 3 ? 'Critical' : v.severity === 2 ? 'High' : 'Stable'}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 mb-4 text-[10px] tabular-nums font-bold">
@@ -630,16 +1015,33 @@ export default function App() {
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => handleAssign(v.id)}
-                      className="w-full glass-card bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-[10px] font-black tracking-[0.1em] flex items-center justify-center transition-all group-hover:shadow-lg group-hover:shadow-blue-500/20"
-                    >
-                      <MapPin size={12} className="mr-2" /> DISPATCH MISSION
-                    </button>
+                    {qrData[v.id] && (
+                      <div className="bg-slate-800 rounded-xl p-2 flex flex-col items-center gap-1 mt-2 mb-3">
+                        <img src={`data:image/png;base64,${qrData[v.id]}`} className="w-28 h-28 shrink-0 relative z-10" alt="Victim QR Code" />
+                        <p className="text-slate-500 text-[10px]">Scan to open on mobile</p>
+                        <input readOnly value={`http://localhost:5173/victim/${v.id}`} className="text-[10px] bg-slate-700 text-slate-400 rounded px-2 py-1 w-full text-center outline-none selection:bg-blue-500/30" onClick={(e) => e.target.select()} />
+                      </div>
+                    )}
+
+                    {v.status === 'assigned' ? (
+                      <button
+                        onClick={() => handleDischarge(v.id, v.hospital_assigned)}
+                        className="w-full glass-card bg-slate-700 hover:bg-slate-600 text-white py-2.5 rounded-xl text-[10px] font-black tracking-[0.1em] flex items-center justify-center transition-all relative z-10"
+                      >
+                        <Activity size={12} className="mr-2" /> DISCHARGE PATIENT
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleAssign(v.id)}
+                        className="w-full glass-card bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-[10px] font-black tracking-[0.1em] flex items-center justify-center transition-all group-hover:shadow-lg group-hover:shadow-blue-500/20"
+                      >
+                        <MapPin size={12} className="mr-2" /> DISPATCH MISSION
+                      </button>
+                    )}
                   </div>
                 ))
             )}
-            {!loading && victims.filter(v => v.status !== 'assigned').length === 0 && (
+            {!loading && victims.filter(v => v.status !== 'discharged').length === 0 && (
               <div className="text-center py-20 flex flex-col items-center">
                 <div className="w-12 h-12 bg-slate-800 rounded-full flex items-center justify-center mb-4">
                   <Activity size={24} className="text-slate-700" />
@@ -647,6 +1049,26 @@ export default function App() {
                 <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest">No Active Emergencies</p>
               </div>
             )}
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-slate-800/50 flex justify-between items-center shrink-0">
+            <button
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={currentPage === 1 || loading}
+              className="p-1.5 bg-slate-800 rounded text-slate-300 disabled:opacity-50 hover:bg-slate-700 transition-colors"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+              Pg {currentPage} OF {Math.max(1, victimsMeta.pages)} <span className="text-slate-600 mx-1">|</span> {victimsMeta.total} TOTAL
+            </span>
+            <button
+              onClick={() => setCurrentPage(prev => Math.min(victimsMeta.pages, prev + 1))}
+              disabled={currentPage >= victimsMeta.pages || loading}
+              className="p-1.5 bg-slate-800 rounded text-slate-300 disabled:opacity-50 hover:bg-slate-700 transition-colors"
+            >
+              <ChevronRight size={16} />
+            </button>
           </div>
         </aside>
       </div>
