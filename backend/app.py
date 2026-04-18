@@ -1,18 +1,13 @@
 import eventlet
 eventlet.monkey_patch()
-from flask import Flask, jsonify, request
-from flask_socketio import SocketIO
+
+from flask import Flask
 from flask_cors import CORS
-import sqlite3
-from datetime import datetime
-from ml_model import predict_triage
-from clustering import calculate_hotspots
-from math import radians, cos, sin, asin, sqrt
-import uuid
-import os
-import qrcode
-import io
-import base64
+
+from config import DB_PATH
+from lib.logging_config import get_logger
+from migrations.runner import run_migrations
+from lib.extensions import socketio, api
 
 from auth.register import register_bp
 from auth.login import login_bp
@@ -20,433 +15,50 @@ from auth.profile import profile_bp
 from routes.victim_routes import victim_bp
 from routes.responder_routes import responder_bp
 from routes.admin_routes import admin_bp
-from middleware.role_guard import require_auth, require_role
-from config import DB_PATH, DEFAULT_INCIDENT_ID
+from routes.core_routes import core_api
 
-from migrations.runner import run_migrations
-run_migrations()  # safe to call on every startup
+logger = get_logger('triage.app')
+
+run_migrations()
 
 app = Flask(__name__)
 
-# Match SocketIO CORS with REST CORS — only accept from known dashboard origin
+app.config['API_TITLE'] = 'DisasterTriageNet API'
+app.config['API_VERSION'] = 'v1'
+app.config['OPENAPI_VERSION'] = '3.0.2'
+app.config['OPENAPI_URL_PREFIX'] = '/api/v1'
+app.config['OPENAPI_SWAGGER_UI_PATH'] = '/docs'
+app.config['OPENAPI_SWAGGER_UI_URL'] = 'https://cdn.jsdelivr.net/npm/swagger-ui-dist/'
+app.config['OPENAPI_JSON_PATH'] = '/api/openapi.json'
+app.config['API_SPEC'] = {
+    'security': [{'BearerAuth': []}],
+    'components': {
+        'securitySchemes': {
+            'BearerAuth': {
+                'type': 'http',
+                'scheme': 'bearer',
+                'bearerFormat': 'JWT'
+            }
+        }
+    }
+}
+
 ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
-socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS)
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
 
-# Register Auth Blueprints
+api.init_app(app)
+socketio.init_app(app, cors_allowed_origins=ALLOWED_ORIGINS)
+
 app.register_blueprint(register_bp, url_prefix='/api/auth')
 app.register_blueprint(login_bp, url_prefix='/api/auth')
 app.register_blueprint(profile_bp, url_prefix='/api/auth')
 
-# Register Feature Blueprints
 app.register_blueprint(victim_bp)
 app.register_blueprint(responder_bp)
 app.register_blueprint(admin_bp)
 
-# DB_PATH is now loaded from config.py
-
-def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def get_distance(lat1, lon1, lat2, lon2):
-    R = 6371.0
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    dlat, dlon = lat2 - lat1, lon2 - lon1
-    a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
-    return R * (2 * asin(sqrt(a)))
-
-def match_hospital(victim_lat, victim_lng):
-    try:
-        conn = get_db_connection()
-        hospitals = conn.execute('SELECT * FROM hospitals WHERE available_beds > 0').fetchall()
-        conn.close()
-        best_hospital = None
-        min_distance = float('inf')
-        for h in hospitals:
-            dist = get_distance(victim_lat, victim_lng, h['lat'], h['lng'])
-            if dist < min_distance:
-                min_distance = dist
-                best_hospital = h
-        return best_hospital
-    except Exception as e:
-        print(f"Hospital Match Error: {e}")
-        return None
-
-def run_clustering(incident_id=DEFAULT_INCIDENT_ID):
-    try:
-        calculate_hotspots(incident_id)
-        socketio.emit('clusters_updated', {'incident_id': incident_id})
-    except Exception as e:
-        print(f"Background Clustering Error: {e}")
-
-# --- API ROUTES ---
-
-@app.route('/api/ingest', methods=['POST'])
-@require_role('responder', 'admin')
-def ingest_data():
-    data = request.json
-    if not data:
-        return jsonify({"error": "No data received"}), 400
-
-    # Validate required fields
-    required = ['age', 'heart_rate', 'spo2', 'temperature', 'lat', 'lng']
-    missing = [f for f in required if f not in data]
-    if missing:
-        return jsonify({"error": f"Missing required fields: {missing}"}), 400
-
-    # Use UUID to avoid ID collisions
-    victim_id = f"V-{uuid.uuid4().hex[:8].upper()}"
-
-    try:
-        severity = predict_triage(
-            data['age'], data['heart_rate'], data['spo2'], data['temperature']
-        )
-    except Exception as e:
-        print(f"ML Prediction Error: {e}")
-        severity = 1  # Fallback to moderate
-
-    matched_hosp = match_hospital(data['lat'], data['lng'])
-    hosp_name = matched_hosp['name'] if matched_hosp else "Waitlisted"
-
-    conn = None
-    try:
-        conn = get_db_connection()
-        incident_id = data.get('incident_id', DEFAULT_INCIDENT_ID)
-        conn.execute('''
-            INSERT INTO victims (id, age, heart_rate, spo2, temperature, triage_level, lat, lng, timestamp, status, hospital_assigned, incident_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            victim_id, data['age'], data['heart_rate'], data['spo2'], data['temperature'],
-            severity, data['lat'], data['lng'], datetime.now().isoformat(), 'unassigned', hosp_name, incident_id
-        ))
-        if matched_hosp:
-            conn.execute('UPDATE hospitals SET available_beds = available_beds - 1 WHERE id = ?', (matched_hosp['id'],))
-        conn.commit()
-    except sqlite3.Error as e:
-        print(f"Database Insertion Error: {e}")
-        if conn: conn.rollback()
-        return jsonify({"error": "Database error", "details": str(e)}), 500
-    finally:
-        if conn: conn.close()
-
-    socketio.start_background_task(run_clustering, incident_id)
-
-    socketio.emit('victim_ingested', {
-        'id': victim_id,
-        'triage_level': severity,
-        'lat': data['lat'],
-        'lng': data['lng'],
-        'hospital_assigned': hosp_name,
-        'timestamp': datetime.now().isoformat(),
-        'incident_id': incident_id
-    })
-
-    return jsonify({
-        "status": "success",
-        "victim_id": victim_id,
-        "predicted_severity": severity,
-        "assigned_to": hosp_name
-    }), 201
-
-@app.route('/api/ambulances', methods=['GET'])
-@require_auth
-def get_ambulances():
-    """Return all ambulances from the database."""
-    try:
-        conn = get_db_connection()
-        rows = conn.execute('SELECT * FROM ambulances ORDER BY id').fetchall()
-        conn.close()
-        return jsonify([dict(r) for r in rows])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/ambulances/<amb_id>/status', methods=['PATCH'])
-@require_role('responder', 'admin')
-def update_ambulance_status(amb_id):
-    """Update an ambulance's status and optionally its assigned victim."""
-    data = request.json
-    if not data or 'status' not in data:
-        return jsonify({"error": "'status' field is required"}), 400
-    new_status = data['status'].lower()
-    if new_status not in ('available', 'busy', 'offline'):
-        return jsonify({"error": "status must be available, busy, or offline"}), 400
-    assigned_victim = data.get('assigned_victim', None)
-    conn = None
-    try:
-        conn = get_db_connection()
-        row = conn.execute("SELECT id FROM ambulances WHERE id = ?", (amb_id,)).fetchone()
-        if not row:
-            return jsonify({"error": "Ambulance not found"}), 404
-        conn.execute(
-            "UPDATE ambulances SET status = ?, assigned_victim = ? WHERE id = ?",
-            (new_status, assigned_victim, amb_id)
-        )
-        conn.commit()
-        socketio.emit('ambulance_updated', {'amb_id': amb_id, 'status': new_status, 'assigned_victim': assigned_victim})
-        return jsonify({"status": new_status, "amb_id": amb_id}), 200
-    except sqlite3.Error as e:
-        if conn: conn.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if conn: conn.close()
-
-@app.route('/api/assign/<victim_id>', methods=['POST'])
-@require_role('responder', 'admin')
-def assign_victim(victim_id):
-    """Mark a victim as dispatched and auto-assign the nearest available ambulance."""
-    conn = None
-    try:
-        conn = get_db_connection()
-        victim = conn.execute("SELECT * FROM victims WHERE id = ?", (victim_id,)).fetchone()
-        if not victim:
-            return jsonify({"error": "Victim not found"}), 404
-        if victim['status'] == 'assigned':
-            return jsonify({"message": "Already assigned", "victim_id": victim_id}), 200
-
-        conn.execute("UPDATE victims SET status = 'assigned' WHERE id = ?", (victim_id,))
-
-        # Auto-assign the nearest available ambulance
-        ambulances = conn.execute(
-            "SELECT * FROM ambulances WHERE status = 'available'"
-        ).fetchall()
-        assigned_amb = None
-        if ambulances and victim['lat'] and victim['lng']:
-            nearest = min(
-                ambulances,
-                key=lambda a: get_distance(victim['lat'], victim['lng'], a['lat'], a['lng'])
-            )
-            conn.execute(
-                "UPDATE ambulances SET status = 'busy', assigned_victim = ? WHERE id = ?",
-                (victim_id, nearest['id'])
-            )
-            assigned_amb = nearest['id']
-
-        conn.commit()
-        socketio.emit('victim_assigned', {'victim_id': victim_id, 'ambulance_id': assigned_amb})
-        if assigned_amb:
-            socketio.emit('ambulance_updated', {'amb_id': assigned_amb, 'status': 'busy', 'assigned_victim': victim_id})
-        return jsonify({"status": "assigned", "victim_id": victim_id, "ambulance_assigned": assigned_amb}), 200
-    except sqlite3.Error as e:
-        if conn: conn.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if conn: conn.close()
-
-@app.route('/api/victims/<victim_id>/discharge', methods=['PATCH'])
-@require_role('responder', 'admin')
-def discharge_victim(victim_id):
-    """
-    Mark a victim as discharged and increment the available beds
-    at their assigned hospital (capped at total_beds).
-    """
-    conn = None
-    try:
-        conn = get_db_connection()
-        victim = conn.execute("SELECT * FROM victims WHERE id = ?", (victim_id,)).fetchone()
-        if not victim:
-            return jsonify({"error": "Victim not found"}), 404
-        if victim['status'] == 'discharged':
-            return jsonify({"message": "Already discharged", "victim_id": victim_id}), 200
-
-        discharged_at = datetime.now().isoformat()
-        conn.execute(
-            "UPDATE victims SET status = 'discharged', discharged_at = ? WHERE id = ?",
-            (discharged_at, victim_id)
-        )
-
-        # Replenish one bed at the assigned hospital, capped at total_beds
-        updated_hospital = None
-        if victim['hospital_assigned'] and victim['hospital_assigned'] != 'Waitlisted':
-            hospital = conn.execute(
-                "SELECT * FROM hospitals WHERE name = ?", (victim['hospital_assigned'],)
-            ).fetchone()
-            if hospital:
-                new_beds = min(hospital['available_beds'] + 1, hospital['total_beds'])
-                conn.execute(
-                    "UPDATE hospitals SET available_beds = ? WHERE id = ?",
-                    (new_beds, hospital['id'])
-                )
-                updated_hospital = {
-                    'id': hospital['id'],
-                    'name': hospital['name'],
-                    'available_beds': new_beds,
-                    'total_beds': hospital['total_beds']
-                }
-
-        conn.commit()
-        socketio.emit('victim_discharged', {
-            'victim_id': victim_id,
-            'hospital': updated_hospital
-        })
-        return jsonify({
-            "status": "discharged",
-            "victim_id": victim_id,
-            "hospital_beds_updated": updated_hospital
-        }), 200
-    except sqlite3.Error as e:
-        if conn: conn.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if conn: conn.close()
-
-@app.route('/api/hospitals/<int:hospital_id>/replenish', methods=['POST'])
-@require_role('admin')
-def replenish_hospital(hospital_id):
-    """
-    Manually add beds back to a hospital (admin use).
-    Accepts { "beds": N } — adds N beds, capped at total_beds.
-    """
-    data = request.json
-    if not data or 'beds' not in data:
-        return jsonify({"error": "'beds' field is required"}), 400
-    try:
-        beds_to_add = int(data['beds'])
-        if beds_to_add <= 0:
-            return jsonify({"error": "'beds' must be a positive integer"}), 400
-    except (TypeError, ValueError):
-        return jsonify({"error": "'beds' must be an integer"}), 400
-
-    conn = None
-    try:
-        conn = get_db_connection()
-        hospital = conn.execute("SELECT * FROM hospitals WHERE id = ?", (hospital_id,)).fetchone()
-        if not hospital:
-            return jsonify({"error": "Hospital not found"}), 404
-
-        new_beds = min(hospital['available_beds'] + beds_to_add, hospital['total_beds'])
-        conn.execute("UPDATE hospitals SET available_beds = ? WHERE id = ?", (new_beds, hospital_id))
-        conn.commit()
-        socketio.emit('hospital_replenished', {'hospital_id': hospital_id, 'available_beds': new_beds})
-        return jsonify({
-            "hospital_id": hospital_id,
-            "name": hospital['name'],
-            "available_beds": new_beds,
-            "total_beds": hospital['total_beds'],
-            "beds_added": new_beds - hospital['available_beds']
-        }), 200
-    except sqlite3.Error as e:
-        if conn: conn.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if conn: conn.close()
-
-@app.route('/api/incidents', methods=['GET'])
-@require_auth
-def get_incidents():
-    try:
-        conn = get_db_connection()
-        rows = conn.execute('SELECT * FROM incidents ORDER BY created_at DESC').fetchall()
-        conn.close()
-        return jsonify([dict(r) for r in rows])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/incidents', methods=['POST'])
-@require_role('admin')
-def create_incident():
-    try:
-        data = request.json
-        if not data or 'name' not in data:
-            return jsonify({"error": "'name' field is required"}), 400
-        inc_id = f"INC-{uuid.uuid4().hex[:6].upper()}"
-        conn = get_db_connection()
-        conn.execute(
-            'INSERT INTO incidents (id, name, type, lat, lng) VALUES (?, ?, ?, ?, ?)',
-            (inc_id, data['name'], data.get('type', 'general'), data.get('lat', 13.0827), data.get('lng', 80.2707))
-        )
-        conn.commit()
-        conn.close()
-        return jsonify({'incident_id': inc_id}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-
-@app.route('/api/victims', methods=['GET'])
-def get_victims():
-    try:
-        page = int(request.args.get('page', 1))
-        limit = min(int(request.args.get('limit', 50)), 200)
-        severity = request.args.get('severity')
-        status = request.args.get('status')
-        incident_id = request.args.get('incident_id')
-        
-        offset = (page - 1) * limit
-        
-        query = 'SELECT * FROM victims WHERE 1=1'
-        count_query = 'SELECT COUNT(*) FROM victims WHERE 1=1'
-        params = []
-        
-        if incident_id:
-            query += ' AND incident_id=?'
-            count_query += ' AND incident_id=?'
-            params.append(incident_id)
-        if severity is not None:
-            query += ' AND triage_level=?'
-            count_query += ' AND triage_level=?'
-            params.append(int(severity))
-        if status:
-            query += ' AND status=?'
-            count_query += ' AND status=?'
-            params.append(status)
-            
-        query += ' ORDER BY triage_level DESC, timestamp ASC LIMIT ? OFFSET ?'
-        params.extend([limit, offset])
-        
-        conn = get_db_connection()
-        victims = conn.execute(query, params).fetchall()
-        total = conn.execute(count_query, params[:-2]).fetchone()[0]
-        conn.close()
-        
-        return jsonify({
-            "victims": [dict(row) for row in victims],
-            "total": total,
-            "page": page,
-            "pages": (total + limit - 1) // limit,
-            "limit": limit
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/clusters', methods=['GET'])
-@require_auth
-def get_clusters():
-    try:
-        incident_id = request.args.get('incident_id')
-        conn = get_db_connection()
-        if incident_id:
-            clusters = conn.execute('SELECT * FROM clusters WHERE incident_id=?', (incident_id,)).fetchall()
-        else:
-            clusters = conn.execute('SELECT * FROM clusters').fetchall()
-        conn.close()
-        return jsonify([dict(row) for row in clusters])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/hospitals', methods=['GET'])
-@require_auth
-def get_hospitals():
-    try:
-        conn = get_db_connection()
-        hospitals = [dict(row) for row in conn.execute('SELECT * FROM hospitals').fetchall()]
-        clusters = [dict(row) for row in conn.execute('SELECT lat, lng FROM clusters').fetchall()]
-        conn.close()
-        result = []
-        for h in hospitals:
-            if clusters:
-                min_dist = min(get_distance(h['lat'], h['lng'], c['lat'], c['lng']) for c in clusters)
-                h['eta_minutes'] = round((min_dist / 40) * 60, 1)
-                h['distance_km'] = round(min_dist, 2)
-            else:
-                h['eta_minutes'] = None
-                h['distance_km'] = None
-            result.append(h)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+api.register_blueprint(core_api)
 
 if __name__ == '__main__':
-    print("API starting on http://0.0.0.0:5001")
+    logger.info("API starting on http://0.0.0.0:5001")
     socketio.run(app, debug=False, port=5001, host='0.0.0.0')

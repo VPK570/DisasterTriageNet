@@ -1,16 +1,21 @@
-# React + Vite
+# Rescue Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React frontend for DisasterTriageNet. For project overview and setup instructions, see the root [README.md](../README.md).
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 🧩 Components
 
-## React Compiler
+| Component | Description |
+|-----------|-------------|
+| `MapView.jsx` | Leaflet-based interactive map with victim markers and cluster visualizations |
+| `AmbulancePanel.jsx` | Real-time ambulance fleet management panel with live status updates |
+| `IncidentTimeline.jsx` | Chronological timeline of victim status changes during an incident |
+| `VictimCard.jsx` | Mobile-optimized victim info card with vitals and triage status |
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## ⚙️ Configuration
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- `config.js` - API base URL and environment settings
+- `socket.js` - WebSocket client for real-time updates

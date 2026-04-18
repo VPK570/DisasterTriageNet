@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request
-from middleware.role_guard import require_role
+from lib.role_guard import require_role
 import qrcode
 import io
 import base64

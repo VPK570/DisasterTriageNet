@@ -5,18 +5,27 @@ sys.path.append(os.path.dirname(__file__))
 from config import DB_PATH, DEFAULT_INCIDENT_ID, DEFAULT_INCIDENT_NAME
 from migrations.runner import run_migrations
 import sqlite3
+from lib.logging_config import get_logger
+
+logger = get_logger('triage.setup')
+
+def init_db():
+    if os.path.exists(DB_PATH):
+        os.remove(DB_PATH)
+    run_migrations()
+    seed_data()
 
 def seed_data():
     conn = sqlite3.connect(DB_PATH)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA busy_timeout=5000')
     cursor = conn.cursor()
 
-    # Seed a default incident
-    cursor.execute(f'''
-        INSERT OR IGNORE INTO incidents (id, name, type, lat, lng)
-        VALUES ('{DEFAULT_INCIDENT_ID}', '{DEFAULT_INCIDENT_NAME}', 'flood', 13.0827, 80.2707)
-    ''')
+    cursor.execute(
+        'INSERT OR IGNORE INTO incidents (id, name, type, lat, lng) VALUES (?, ?, ?, ?, ?)',
+        (DEFAULT_INCIDENT_ID, DEFAULT_INCIDENT_NAME, 'flood', 13.0827, 80.2707)
+    )
 
-    # Seed system accounts
     import bcrypt
     import uuid
     from datetime import datetime, timezone
@@ -31,7 +40,6 @@ def seed_data():
         VALUES (?, ?, ?, ?, ?, ?)
     ''', system_users)
 
-    # Seed Data: Real Chennai Hospitals
     hospitals = [
         ("Rajiv Gandhi Govt General Hospital", 13.0818, 80.2755, 500, 150, "General Emergency"),
         ("Apollo Main Hospital, Greams Road",  13.0607, 80.2512, 200,  45, "Trauma/Cardiac"),
@@ -45,7 +53,6 @@ def seed_data():
         VALUES (?, ?, ?, ?, ?, ?)
     ''', hospitals)
 
-    # Seed ambulances — matches the former mockData.js entries
     ambulances = [
         ("AMB-01", "available", "Adyar",    13.0012, 80.2565, None),
         ("AMB-02", "busy",      "T. Nagar", 13.0418, 80.2341, None),
@@ -57,21 +64,17 @@ def seed_data():
 
     conn.commit()
     conn.close()
-    print("Database 'triage.db' initialized and seeded with default data.")
+    logger.info("Database '%s' initialized and seeded with default data.", DB_PATH)
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == '--fresh':
-        confirm = input("⚠️ WARNING: This will drop all tables and completely permanently erase all data. Proceed? [y/N]: ")
+        confirm = input("WARNING: This will drop all tables and completely permanently erase all data. Proceed? [y/N]: ")
         if confirm.lower() == 'y':
-            print("Running fresh install...")
-            if os.path.exists(DB_PATH):
-                os.remove(DB_PATH)
-                print("🗑️ Existing database removed.")
-            run_migrations()
-            seed_data()
-            print("✅ Fresh database created and seeded.")
+            logger.info("Running fresh install...")
+            init_db()
+            logger.info("Fresh database created and seeded.")
         else:
-            print("Aborted.")
+            logger.info("Aborted.")
     else:
-        print("Running standard db migrations...")
+        logger.info("Running standard db migrations...")
         run_migrations()

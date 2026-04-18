@@ -30,3 +30,20 @@ Thumbs.db
 # IDEs
 .vscode/
 .idea/
+
+# AI/Editor caches
+.codectx_cache/
+.benchmarks/
+
+# ML model artifacts
+*_model.txt
+
+# Auto-generated context
+CONTEXT.md
+
+# Graphify Knowledge Graph
+graphify-out/
+.graphify_*.json
+.graphify_*.txt
+.opencode/plugins/
+opencode.json

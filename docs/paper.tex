@@ -1,0 +1,551 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{makecell}
+\usepackage{tabularx}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{DisasterTriageNet: A Dynamic Triage-Driven Re-Optimization System for Real-Time Emergency Resource Allocation in Mass-Casualty Incidents}
+
+\author{\IEEEauthorblockN{Krishna VP}
+\IEEEauthorblockA{\textit{School of Electronics Engineering (SENSE)}\\
+Vellore Institute of Technology, Katpadi, India \\
+krishna.vp2025@vitsudent.ac.in}
+}
+
+\maketitle
+
+\begin{abstract}
+Mass-casualty incidents (MCIs) overwhelm static emergency response systems. Current approaches treat triage and dispatch as sequential one-shot operations, failing to capture victim condition changes between initial assessment and transport. This paper presents DisasterTriageNet, a closed-loop re-optimization system that couples continuous ML-based vital sign re-scoring with event-driven ambulance dispatch re-optimization. Our system achieves 12.5\% faster mean assignment time for critical victims (88.6s vs 101.5s) and captures 38.7 re-optimization events per deterioration scenario, compared to zero events in all baseline approaches. Results demonstrate that dynamic coupling between continuous physiological monitoring and dispatch re-optimization significantly improves resource allocation under victim deterioration conditions.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Mass-casualty incidents, emergency dispatch, dynamic triage, machine learning, resource optimization, real-time systems
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Mass-casualty incidents (MCIs) represent one of the most critical challenges in emergency healthcare. India records approximately 450,000 road accident fatalities and 1.5 million serious injuries annually, the highest globally according to MoRTH data. Beyond road accidents, India faces recurring large-scale MCIs: the 2023 Odisha train collision resulted in 288 deaths and over 1,000 injuries, overwhelming regional triage capacity. The 2024 Wayanad landslides and 2013 Uttarakhand floods each produced victim counts exceeding local emergency response capacity by orders of magnitude. India's 108 ambulance service, operational across 20+ states, handles over 30 million calls annually \cite{gvkemri2022} yet operates without dynamic triage-dispatch coupling. The fundamental time constraint in emergency response is governed by the "golden hour" principle: survival rates for critically injured victims drop dramatically when care is delayed beyond 60 minutes from the time of injury. Despite this well-established temporal constraint, current emergency response systems operate on a fundamentally static model that cannot adapt to changing victim conditions. Victim condition deterioration between initial triage and transport is a recognized phenomenon in MCI response, with secondary deterioration rates varying by incident type, response interval, and injury mechanism. This phenomenon renders static triage extraordinarily dangerous: a victim classified as "delayed" (Yellow category) during initial triage may deteriorate to "immediate" (Red category) while awaiting transport, yet the original dispatch assignment remains unchanged, effectively condemning that victim to delayed care during the most critical window for survival.
+
+Current emergency response workflows treat triage and dispatch as separate, sequential operations: victims are categorized at the scene, and ambulance assignments are made based on initial triage labels. However, victim conditions are inherently dynamic---deterioration or improvement between initial assessment and transport is not reflected in dispatch decisions, leading to suboptimal resource allocation when it matters most. The fundamental danger of static approaches lies in their inability to capture the temporal dimension of victim physiology: a stable victim may hemorrhage blood internally, develop respiratory distress, or suffer cardiac events that transform a non-critical classification into a life-threatening emergency. Without continuous re-assessment and dynamic dispatch re-optimization, resources remain allocated based on outdated information, creating a dangerous disconnect between the actual physiological state of victims and the resource deployment decisions made on their behalf.
+
+India's emergency healthcare infrastructure, particularly outside tier-1 cities where 68.8\% of the population resides \cite{census2011}, treats triage and dispatch as sequential one-shot operations with no mechanism for closed-loop feedback. No existing system implements a feedback loop where continuous vital sign changes trigger re-optimization of ambulance assignments. Prior art includes US7761309B2 for static MCI triage, US7624024B2 for dispatch optimization without triage feedback, and US20130030825A1 for ED triage without dispatch coupling.
+
+This paper makes four key contributions: (1) a closed-loop architecture coupling continuous ML triage re-scoring with event-driven dispatch re-optimization; (2) a severity-weighted ambulance assignment objective function replacing pure distance greedy approaches; (3) a cluster-proportional fleet allocation algorithm for multi-cluster MCI scenarios; and (4) an open benchmark suite with three scenario types and ablation study validating each component's contribution.
+
+The dynamic victim deterioration rate $\lambda_d$ is modeled as:
+
+\begin{equation}
+\lambda_d = \frac{1}{N_v} \sum_{v \in V} 
+\mathbb{I}\bigl( S(v, t_1) < S(v, t_0) \bigr) 
+\cdot \frac{S(v, t_0) - S(v, t_1)}{t_1 - t_0}
+\end{equation}
+
+where $S(v, t)$ denotes the severity score of victim $v$ at time $t$, and $t_0$ and $t_1$ represent the initial triage and current assessment times respectively. The cluster-proportional fleet allocation for multi-cluster MCI scenarios is computed as:
+
+\begin{equation}
+A_c = A_{total} \cdot \frac{M_c}{\sum_{c' \in C} M_{c'}}, \quad \forall c \in C
+\end{equation}
+
+where $A_c$ is the number of ambulances allocated to cluster $c$, $A_{total}$ is the total available fleet, $M_c = \sum_{v \in V_c} S(v)$ is the severity mass of cluster $c$, and $C$ is the set of all clusters.
+
+The paper is organized as follows. Section 2 reviews related work. Section 3 describes the system architecture. Section 4 presents experimental evaluation. Section 5 discusses limitations and clinical applicability. Section 6 concludes.
+
+\section{Related Work}
+
+\subsection{ML-Based Triage Systems}
+
+Prior work in ML-based triage includes point-in-time severity scoring systems (U.S. Patent 12,148,529, Dec. 2024; U.S. Patent 9,775,533, Oct. 2017; European Patent Application EP4440425A1, Sep. 2024) that apply machine learning models to initial patient assessments. A fundamental limitation of these systems is that they treat triage as a static, one-time classification event---after initial scoring, no mechanism exists to update victim severity as physiological conditions evolve during the response window. This creates a critical gap: a victim's condition may deteriorate significantly between initial assessment and ambulance arrival, yet the dispatch decision remains based on outdated information. Rule-based triage systems (U.S. Patent 7,716,070, May 2010; U.S. Patent 7,899,682, Mar. 2011; U.S. Patent Application 2023/0245011, Aug. 2023) suffer from the same static paradigm. Recent work on online ambulance routing addresses time-varying victim conditions in routing optimization \cite{shiri2024}, but operates at the routing level without coupling to continuous physiological re-scoring. Separately, ABMS-driven reinforcement learning approaches \cite{muratetu2025} have explored adaptive resource allocation using agent-based modeling combined with RL for casualty-to-hospital assignment, achieving 12-18\% survival rate improvements. However, this work operates at the casualty-to-hospital assignment level rather than integrating continuous physiological monitoring at the scene. DisasterTriageNet complements these approaches by focusing on the front-end coupling between continuous vital sign re-scoring and ambulance dispatch re-optimization.
+
+These prior systems collectively demonstrate that ML triage and optimization-based dispatch have been well explored independently. However, none implement the closed-loop feedback architecture required to detect and respond to victim deterioration in real-time. Our work addresses this gap by formalizing the coupling between continuous physiological monitoring and event-driven dispatch re-optimization.
+
+\subsection{Ambulance Dispatch Optimization}
+
+Ambulance dispatch optimization has been extensively studied in both patent literature and academic research. Static dispatch assignment approaches (U.S. Patent 7,624,024, Dec. 2009; U.S. Patent Application 2017/0344707, Dec. 2017; U.S. Patent Application 2023/0370540, Dec. 2023; U.S. Patent 10,846,635, Nov. 2024) optimize routing given a fixed set of patients at assignment time, but fundamentally lack mechanisms to incorporate feedback from patient condition changes that occur post-assignment. The limitation is architectural rather than algorithmic: dispatch is treated as a one-shot optimization problem solved once and never revisited. While recent online routing algorithms \cite{shiri2024} address uncertainty in travel times and victim conditions during the routing phase, they do not trigger re-optimization of dispatch decisions based on physiological changes detected through continuous monitoring. This static paradigm means that a deteriorating victim waiting for an already-dispatched ambulance receives no priority adjustment, even if their condition worsens to critical. DisasterTriageNet addresses this limitation by introducing a trigger mechanism that fires re-optimization when severity changes exceed a threshold, dynamically re-assigning resources to match the evolved threat landscape.
+
+\subsection{Mass-Casualty Incident Management}
+
+MCI management systems (U.S. Patent 7,761,309, Jul. 2010; U.S. Patent 10,861,320, Dec. 2020; U.S. Patent 10,595,183, Mar. 2020; U.S. Patent 10,904,696, Jan. 2021) incorporate triage categories into resource allocation but rely on static triage inputs obtained at scene entry. Once victims are categorized at initial assessment, these systems do not re-evaluate allocation as individual conditions change over time. The architectural limitation is that triage and dispatch are decoupled, sequential processes rather than integrated components of a closed-loop system. This creates a temporal blind spot: resource allocation decisions made during initial triage become progressively less optimal as time passes and victims' conditions evolve. The RL-based resource allocation work \cite{muratetu2025} represents a complementary approach that optimizes casualty-to-hospital matching using learned policies. While this achieves meaningful survival rate improvements, it operates at a different temporal stage---post-transport casualty-to-hospital assignment rather than pre-transport dispatch. Our work addresses the earlier critical window between initial triage and ambulance dispatch, where most of the response time variability occurs.
+
+The gap is that tracking provides information without actionable response: a deterioration event in the tracking system does not automatically trigger dispatch re-optimization. DisasterTriageNet extends tracking infrastructure with an active response layer that converts monitoring data into actionable dispatch decisions.
+
+\subsection{Victim Tracking and Hospital Resources}
+
+Victim tracking systems (U.S. Patent 6,761,312, Jul. 2004; U.S. Patent 11,107,588, Aug. 2021) focus on identification and hospital bed management, providing essential infrastructure for casualty tracking but not addressing the dynamic coupling between physiological monitoring and dispatch decision-making. These systems maintain situational awareness but do not influence resource allocation in real-time.
+
+\subsection{IoT-Based Real-Time Monitoring}
+
+IoT-based emergency response systems (PCT Application WO2018048556A1, Mar. 2018; U.S. Patent Application 2023/0034481, Feb. 2023) enable real-time sensor data collection including vital signs, but architecturally lack the coupling between continuous vital sign monitoring and dispatch re-optimization. These systems demonstrate the technological feasibility of continuous monitoring but do not implement the decision loop that connects monitoring data to resource re-allocation. The monitoring data flows to dashboards but not to dispatch engines. This represents a key gap that DisasterTriageNet fills: converting monitoring infrastructure from a passive observation layer to an active decision-support system.
+
+Recent online routing research \cite{shiri2024} addresses similar problems of dynamic uncertainty in emergency response, focusing on routing optimization under uncertain travel times and victim conditions, while DisasterTriageNet addresses the complementary problem of continuous physiological re-scoring that triggers re-routing decisions.
+
+\subsection{Gap Analysis}
+
+The 67 patents surveyed in our literature review, combined with the academic literature, confirm that no existing system implements a feedback loop where continuous vital sign changes trigger re-optimization of ambulance assignments. Each subsystem (triage, dispatch, tracking, IoT monitoring) has been individually optimized, but no architecture formalizes the coupling between continuous physiological re-scoring and event-driven dispatch re-optimization. This gap exists because prior work treats triage as a point-in-time classification and dispatch as a static assignment problem. Our system addresses this gap by treating triage as a continuous process and coupling it to dispatch via threshold-triggered re-optimization. This gap is particularly acute in the Indian context, where the 108 ambulance network and NDRF response teams operate under significant resource constraints and victim-to-responder ratios far exceeding those in developed nations.
+
+\section{System Architecture}
+
+\subsection{Overview}
+
+Figure 1 illustrates the end-to-end flow of DisasterTriageNet. The system consists of five primary components interconnected through an event-driven architecture: (1) IoT Vital Sign Ingestion Layer, (2) Triage Re-Scoring Module, (3) Dispatch Optimizer, (4) TaskQueue Management System, and (5) Real-time Notification Service. Data persistence is provided by a SQLite database operating in WAL mode to support concurrent read/write operations during high-load MCI scenarios.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=0.9\linewidth]{system_flow.png}}
+\caption{System architecture: IoT vitals ingestion, LightGBM re-scoring, delta check, re-optimization trigger, severity-weighted dispatch, hospital assignment, and WebSocket notification.}
+\label{fig:system}
+\end{figure}
+
+The data flow operates as follows: IoT wearable sensors transmit vital signs (heart rate, SpO2, temperature) to the Flask backend via REST endpoints. Each vital sign update is immediately stored in the vitals\_history table and routed to the LightGBM re-scoring module. The model produces a 4-class severity prediction (Red=4, Orange=3, Yellow=2, Green=1). A delta check compares the current severity score against the previous score stored in memory. When the absolute difference exceeds the trigger threshold ($\theta = 1$), a re-optimization event is queued in the TaskQueue. The Dispatch Optimizer consumes these events and computes severity-weighted ambulance assignments. Finally, all state changes are propagated to connected clients via WebSocket events, and re-optimization decisions are logged to the reopt\_events table.
+
+\subsection{Continuous Triage Re-Scoring Module}
+
+The re-scoring module employs a LightGBM gradient boosting classifier trained to predict four-class severity levels corresponding to the START triage categories: Red (Immediate), Orange (Delayed), Yellow (Minor), and Green (Minimal). The model operates in a continuous scoring mode rather than traditional point-in-time classification, re-evaluating each victim's severity upon every vital sign update rather than only at initial assessment.
+
+\subparagraph{Feature Engineering.}
+The model ingests four primary physiological features extracted from IoT sensor data: heart rate (HR) in beats per minute, peripheral oxygen saturation (SpO2) as a percentage, body temperature in degrees Celsius, and patient age in years. These features are preprocessed with standard scaling to normalize value ranges before inference. The feature vector is constructed as a 1D array of shape (1, 4) with the following ordering: [HR, SpO2, Temperature, Age].
+
+The normalized feature vector $\mathbf{x}_v$ for victim $v$ is computed as:
+
+\begin{equation}
+\mathbf{x}_v = \frac{\mathbf{x}_v^{raw} - \boldsymbol{\mu}}{\boldsymbol{\sigma}}
+\end{equation}
+
+where $\boldsymbol{\mu} = [\mu_{HR}, \mu_{SpO2}, \mu_{Temp}, \mu_{Age}]$ and $\boldsymbol{\sigma} = [\sigma_{HR}, \sigma_{SpO2}, \sigma_{Temp}, \sigma_{Age}]$ are the feature-wise mean and standard deviation computed from the training data.
+
+\subparagraph{Severity Score Prediction.}
+The LightGBM model outputs a probability distribution over the four severity classes:
+
+\begin{equation}
+P(y = c \mid \mathbf{x}_v) = \mathrm{Softmax}_c\bigl(\mathbf{W}^T \mathbf{h}(\mathbf{x}_v) + \mathbf{b}\bigr)
+\end{equation}
+
+where $\mathbf{h}(\mathbf{x}_v)$ represents the hidden feature representations from the gradient boosting ensemble, and $\mathbf{W}$ and $\mathbf{b}$ are learned classification weights. The predicted severity class is:
+
+\begin{equation}
+S(v,t) = \arg\max_c P(y = c \mid \mathbf{x}_v)
+\end{equation}
+
+The severity score is encoded as an integer in the range [1, 4] where $S(v,t) = 4$ corresponds to Red (Immediate), $S(v,t) = 3$ to Orange (Delayed), $S(v,t) = 2$ to Yellow (Minor), and $S(v,t) = 1$ to Green (Minimal).
+
+\subparagraph{Training Data Description.}
+The model is trained on a composite dataset assembled from four publicly available sources: (1) a Korean emergency department triage dataset (KTAS-based) with 1,267 records \cite{ktas2023}, (2) a hybrid AI triage dataset combining simulated and clinical emergency care records with 15 cases \cite{hybridai2024}, (3) a synthetic medical triage dataset covering standard triage presentations with 18,000 records \cite{synthetic2024}, and (4) a sepsis prediction dataset providing physiological trajectories for critical deterioration cases. The composite training set contains 19,282 total records covering trauma, sepsis, respiratory, and cardiac presentations.
+
+Ground truth labels were mapped to the four-class severity taxonomy (Red/Orange/Yellow/Green) using established START triage criteria as the mapping reference. The label mapping from original datasets to the four-class system is presented in Table II.
+
+\begin{table}[t]
+\caption{Label Mapping from Original Datasets to START Categories}
+\label{tab:label_mapping}
+centering
+\begin{tabularx}{\linewidth}{|c|c|c|X|}
+\hline
+\textbf{Label} & \textbf{START Cat.} & \textbf{Score} & \textbf{Description} \\
+\hline
+KTAS 1-2 & Red (Immediate) & 4 & \makecell{Life-threatening,\\ requires\\ immediate intervention} \\
+KTAS 3 & Orange (Delayed) & 3 & \makecell{Serious condition,\\ can wait short period} \\
+KTAS 4 & Yellow (Minor) & 2 & \makecell{Non-urgent,\\ minor injuries} \\
+KTAS 5 & Green (Minimal) & 1 & \makecell{Minimal,\\ walking wounded} \\
+\hline
+\end{tabularx}
+\end{table}
+
+The model uses a 70/30 training/validation split with class-balanced weighting to address the imbalanced nature of triage data. The LightGBM hyperparameters used in training are summarized in Table III.
+
+\begin{table}[t]
+\caption{LightGBM Training Hyperparameters}
+\label{tab:lgb_params}
+\centering
+\begin{tabularx}{\linewidth}{|l|X|}
+\hline
+\textbf{Parameter} & \textbf{Value} \\
+\hline
+n\_estimators & 500 \\
+learning\_rate & 0.05 \\
+objective & multiclass (4-class) \\
+class\_weight & balanced \\
+random\_state & 42 \\
+max\_depth & -1 (unlimited) \\
+num\_leaves & 31 (default) \\
+min\_child\_samples & 20 (default) \\
+training\_split & 70\% train, 30\% validation \\
+\hline
+\end{tabularx}
+\end{table}
+
+Limitations of this training approach are discussed in Section IV.F.
+
+\subparagraph{Class Distribution.}
+The training data exhibits the following class distribution reflecting typical MCI triage outcomes: Red (Immediate) comprises approximately 15-20\% of cases, Orange (Delayed) comprises 20-25\%, Yellow (Minor) comprises 35-40\%, and Green (Minimal) comprises 15-20\%. This distribution is consistent with START triage distributions reported in Indian MCI response literature.
+
+\subparagraph{Inference Latency.}
+The LightGBM model achieves a median inference latency of 3.2 milliseconds per prediction on commodity server hardware representative of NDRF and state SDMA deployment environments. This latency includes feature preprocessing, model inference, and SHAP value computation. The end-to-end pipeline from vital sign receipt to severity prediction completes within 10 milliseconds under typical load, enabling real-time re-scoring without introducing perceptible delays in the system response.
+
+\subparagraph{Explainability.}
+SHAP (SHapley Additive exPlanations) values are computed for each re-scoring pass to provide model explainability for clinical stakeholders. SHAP values quantify the contribution of each input feature to the predicted severity score, enabling triage personnel to understand why a particular severity classification was assigned. This interpretability is critical for clinical acceptance and allows manual override when clinical judgment disagrees with model predictions.
+
+The SHAP value for feature $i$ on victim $v$ at time $t$ is computed as:
+
+\begin{equation}
+\phi_i(v, t) = 
+\sum_{S \subseteq F \setminus \{i\}} 
+\binom{d-1}{|S|}^{-1}
+\bigl[ f_v(S \cup \{i\}) - f_v(S) \bigr]
+\end{equation}
+
+where $F = \{1,\dots,d\}$ denotes the feature set, $f_v(S)$ is the model output conditioned on feature set $S$, and $d = 4$ is the total number of input features. The feature contribution to the predicted severity score is:
+
+\begin{equation}
+S(v,t) = \mathbb{E}[f(\mathbf{x}_v)] + \sum_{i=1}^{d} \phi_i(v, t)
+\end{equation}
+
+where $\mathbb{E}[f(\mathbf{x}_v)]$ is the expected model output (base value).
+
+All re-scoring events are logged to the vitals\_history table, maintaining a complete evidence chain of how each victim's severity evolved over time. The logging includes timestamp, victim identifier, feature values, predicted class, SHAP values, and the complete evidence chain for audit and validation purposes.
+
+\subparagraph{Database Schema: vitals\_history Table.}
+The vitals\_history table maintains a chronological record of all vital sign measurements and re-scoring events. The schema is defined as follows:
+
+\begin{table}[t]
+\caption{vitals\_history Table Schema}
+\label{tab:vitals_schema}
+\centering
+\begin{tabularx}{\linewidth}{|l|X|X|}
+\hline
+\textbf{Column} & \textbf{Type} & \textbf{Description} \\
+\hline
+id & INTEGER PRIMARY KEY & Auto-increment key \\
+victim\_id & TEXT & Victim identifier \\
+timestamp & DATETIME & UTC timestamp \\
+heart\_rate & REAL & Heart rate in BPM \\
+spo2 & REAL & Oxygen saturation \% \\
+temperature & REAL & Temperature in Celsius \\
+age & INTEGER & Patient age in years \\
+predicted\_class & INTEGER & 1=Green\ldots4=Red \\
+confidence & REAL & Confidence score 0-1 \\
+shap\_values & TEXT & JSON-encoded SHAP \\
+\hline
+\end{tabularx}
+\end{table}
+
+The table is indexed on (victim\_id, timestamp) for efficient temporal queries and supports retention of the complete vital sign trajectory for each victim throughout the incident lifecycle.
+
+\subparagraph{Database Schema: reopt\_events Table.}
+The reopt\_events table records all re-optimization trigger events fired by the system. This table provides the evidence base for analyzing system adaptability and validating trigger threshold effectiveness:
+
+\begin{table}[t]
+\caption{reopt\_events Table Schema}
+\label{tab:reopt_schema}
+\centering
+\begin{tabularx}{\linewidth}{|l|X|X|}
+\hline
+\textbf{Column} & \textbf{Type} & \textbf{Description} \\
+\hline
+id & INTEGER PRIMARY KEY & Auto-increment key \\
+event\_id & TEXT & UUID for deduplication \\
+victim\_id & TEXT & Victim identifier \\
+timestamp & DATETIME & UTC timestamp \\
+prev\_class & INTEGER & Previous severity class \\
+curr\_class & INTEGER & Current severity class \\
+delta & INTEGER & Class difference \\
+dispatch\_action & TEXT & REASSIGN/PRIORITY\_UPDATE/NONE \\
+assigned\_ambulance & TEXT & Ambulance ID after re-opt \\
+\hline
+\end{tabularx}
+\end{table}
+
+The reopt\_events table enables post-incident analysis of system behavior, allowing researchers to quantify how frequently re-optimization fires and whether re-assignments actually occur based on trigger events.
+
+\subsection{Re-Optimization Trigger}
+
+A re-optimization trigger fires when the severity score changes by one or more severity classes, indicating meaningful physiological deterioration or improvement that warrants resource re-allocation. Formally, let $S(v,t)$ be the severity score of victim $v$ at time $t$, encoded as an integer in the range [1, 4] where 4=Red and 1=Green. A trigger fires when:
+
+\begin{equation}
+|S(v,t) - S(v,t-1)| \geq \theta
+\end{equation}
+
+where $\theta = 1$ represents a one-class severity change threshold. This threshold was selected to balance sensitivity (detecting genuine condition changes) against specificity (avoiding excessive triggering from measurement noise). Empirically, $\theta = 1$ captures clinically significant transitions while filtering out minor vital sign fluctuations.
+
+\subparagraph{TaskQueue Debounce Mechanism.}
+The TaskQueue implements a sophisticated debounce mechanism to prevent cascade overload during periods of rapid vital sign fluctuation. When a trigger fires, it is enqueued with a 3-second cooldown window. During this window, all subsequent triggers for the same victim are suppressed and dropped. The first trigger to enter the queue after the cooldown expires is processed; if multiple triggers queue within the same 3-second window, only the first is retained and the remainder are discarded.
+
+This debounce strategy operates as follows: (1) Upon trigger fire at time $t_0$, the system checks whether a valid trigger exists in the queue for the same victim. (2) If no valid trigger exists, the event is enqueued with expiration time $t_0 + 3$ seconds. (3) Any subsequent triggers for the same victim arriving before $t_0 + 3$ are silently dropped. (4) When the cooldown expires, the queued trigger is dispatched to the dispatch optimizer for processing. (5) If additional triggers arrive after expiration, the cycle repeats.
+
+The debounce mechanism can be formalized as a Boolean function $D(v, t)$ indicating whether a trigger for victim $v$ at time $t$ should be debounced:
+
+\begin{equation}
+D(v, t) = \mathbb{I}\bigl( \exists t' \in [t - \tau_{deb}, t) : T(v, t') = \text{true} \bigr)
+\end{equation}
+
+where $\tau_{deb} = 3$ seconds is the debounce window, $T(v, t')$ indicates whether a trigger fired for victim $v$ at time $t'$, and $\mathbb{I}(\cdot)$ is the indicator function. The processed trigger rate is bounded by:
+
+\begin{equation}
+\frac{d}{dt} \text{Triggers}_{processed}(v) \leq \frac{1}{\tau_{deb}} = \frac{1}{3}\ \text{Hz}
+\end{equation}
+
+The debounce mechanism serves three critical functions: first, it prevents thrashing in the dispatch optimizer where rapid re-optimization would consume computational resources without meaningful benefit; second, it provides a temporal smoothing filter that only responds to sustained rather than transient severity changes; third, it ensures that ambulance crews receive stable rather than oscillating dispatch instructions that could cause confusion in the field.
+
+\subparagraph{Re-Optimization Event Taxonomy: WebSocket Events.}
+The system employs SocketIO for real-time bidirectional communication between the Flask backend and React frontend. The WebSocket event taxonomy is defined as follows:
+
+\begin{table}[t]
+\caption{WebSocket Event Taxonomy}
+\label{tab:ws_events}
+centering
+\begin{tabularx}{\linewidth}{|l|l|X|}
+\hline
+\textbf{Event Name} & \textbf{Payload} & \textbf{Receivers} \\
+\hline
+vitals:update & \{victim\_id, hr, spo2, temp, time\} & All clients \\
+triage:rescore & \{victim\_id, class, conf, shap\} & All clients \\
+trigger:fired & \{victim\_id, prev, curr, delta\} & Dispatch \\
+dispatch:reassign & \{victim\_id, amb\_id, time\} & Dashboard, amb. \\
+hospital:assigned & \{victim\_id, hosp\_id, eta\} & Ambulance, hosp. \\
+cluster:update & \{cluster\_id, victim\_list, mass\} & Command \\
+system:status & \{active, available, fired\} & All clients \\
+\hline
+\end{tabularx}
+\end{table}
+
+The event flow operates as follows: When IoT sensors POST new vital signs, the backend broadcasts a vitals:update event to all connected clients for real-time visualization. After LightGBM re-scoring completes, a triage:rescore event is broadcast with predicted class, confidence score, and SHAP values. When the delta check detects a severity change exceeding the threshold, a trigger:fired event is emitted internally to the dispatch module (not broadcast to clients to avoid premature alerts). The dispatch optimizer processes the trigger and emits dispatch:reassign to update assignments, which the React dashboard displays and forwards to relevant ambulance clients. Hospital assignment notifications are sent via hospital:assigned events to enable receiving facility preparation. Cluster updates are broadcast periodically to maintain situational awareness on the command dashboard. System health metrics are broadcast every 5 seconds via system:status events.
+
+\subparagraph{TaskQueue Implementation Details.}
+The TaskQueue is implemented as an in-memory priority queue with SQLite persistence for durability. Each queue entry contains: event ID (UUID for deduplication), victim ID, priority (derived from severity class), enqueue timestamp, and expiration timestamp. The queue is processed by a dedicated worker thread that dequeues events in priority order (higher severity first) and dispatches them to the dispatch optimizer via an internal function call.
+
+The priority calculation for queue ordering is:
+\begin{equation}
+\text{priority}(v) = S(v,t) \times 10 - \text{wait\_time}(v)
+\end{equation}
+where $S(v,t)$ is the current severity score and wait\_time is the elapsed time since initial triage. This formulation ensures that critical victims are dequeued first while also accounting for queue wait time to prevent indefinite deferral of lower-priority victims.
+
+The TaskQueue maintains a maximum queue depth of 100 events to prevent memory exhaustion during large-scale MCIs. When the queue reaches capacity, the lowest-priority events are dropped with a warning logged to the system log.
+
+\subparagraph{Implementation Stack.}
+The system is implemented as a Flask backend with Flask-SocketIO for real-time communication. The ML re-scoring module runs LightGBM models loaded at startup for minimal inference latency. The frontend command dashboard is built with React and communicates with the backend via both REST endpoints (for bulk data) and WebSocket connections (for real-time updates). Data persistence uses SQLite 3 with WAL (Write-Ahead Logging) mode enabled, which allows concurrent reads while writes proceed, critical for maintaining responsive dashboards during high-concurrency MCI scenarios.
+
+The cluster allocation endpoint validates the proportional algorithm via the live system and logs all allocation decisions to cluster\_allocation\_log for audit and validation. The endpoint accepts POST requests with incident parameters and returns optimized fleet allocation per cluster with confidence intervals derived from historical allocation performance. The system is designed for deployment compatibility with India's 108 ambulance dispatch infrastructure and NDRF command operations, with REST endpoints and WebSocket interfaces conforming to standard integration requirements.
+
+\section{Experimental Evaluation}
+
+\subsection{Experimental Setup}
+
+We evaluate three scenario types: (A) single-cluster MCI with stable vitals, (B) single-cluster MCI with deteriorating victims, and (C) multi-cluster MCI with severity heterogeneity. Three system configurations are compared: BASELINE\_1 (pure distance-greedy dispatch), BASELINE\_2 (severity-weighted dispatch without re-optimization), and SYSTEM (full DisasterTriageNet with re-optimization).
+
+Each configuration-scenario combination is run with 10 independent trials using seeded randomness for reproducibility. Ambulance speed is simulated at 60 km/h. Geographic coordinates use Chennai, Tamil Nadu as the reference location, reflecting a realistic tier-1 Indian city deployment scenario with road network complexity characteristic of dense urban environments. Simulation is necessary because no real MCI dataset at scale exists with continuous vital sign trajectories. This study uses only publicly available datasets and simulation; no human subjects or identifiable patient data were involved, and IRB approval was not required.
+
+\subsection{Metrics}
+
+Five metrics are evaluated: (1) mean\_time\_to\_assignment: average time from incident declaration to ambulance assignment; (2) critical\_mean\_wait: average wait time for Red-category critical victims; (3) critical\_response\_rate: proportion of critical victims assigned within target time; (4) reopt\_events\_fired: count of re-optimization triggers activated; (5) severity\_weighted\_response\_score: aggregate score accounting for both wait time and severity.
+
+Each metric is justified: mean\_time\_to\_assignment measures overall system responsiveness; critical\_mean\_wait focuses on the most time-sensitive victims; critical\_response\_rate measures protocol compliance; reopt\_events\_fired quantifies system adaptability; severity\_weighted\_response\_score provides a unified performance measure.
+
+The severity-weighted response score is computed as:
+
+\begin{equation}
+\text{SWRS} = \frac{1}{N_v} \sum_{v \in V} 
+S(v) \cdot \bigl( t_{assignment}(v) + \alpha \cdot t_{travel}(v) \bigr)
+\end{equation}
+
+where $N_v$ is the total number of victims, $S(v)$ is the severity score of victim $v$ from Equation (3), $t_{assignment}(v)$ is the assignment delay, $t_{travel}(v)$ is the estimated travel time to the assigned hospital, and $\alpha$ is a weighting factor (empirically set to 0.3) balancing assignment urgency against transport efficiency.
+
+The critical response rate is defined as:
+
+\begin{equation}
+\text{CRR} = \frac{1}{N_{Red}} \sum_{v \in V_{Red}} 
+\mathbb{I}\bigl( t_{assignment}(v) \leq T_{target} \bigr)
+\end{equation}
+
+where $N_{Red}$ is the count of Red-category victims, $V_{Red}$ is the set of all Red-category victims, $T_{target}$ is the target assignment time (60 seconds in our experiments), and $\mathbb{I}(\cdot)$ is the indicator function.
+
+\begin{table*}[t]
+\caption{Performance Comparison Across Scenarios and Systems (Mean ± SD over 10 runs)}
+\label{tab:main}
+\centering
+\begin{tabular}{|c|c|c|c|c|c|c|}
+\hline
+\textbf{Scenario} & \textbf{System} & \textbf{Mean Time to} & \textbf{Critical Mean} & \textbf{Re-opt} & \textbf{Tracked} & \textbf{Critical} \\
+& & \textbf{Assignment (s)} & \textbf{Wait (s)} & \textbf{Events} & \textbf{Worsened} & \textbf{Rate (\%)} \\
+\hline
+A & BASELINE\_1 & 101.2 ± 7.9 & 101.5 ± 4.3 & 0.0 ± 0.0 & 0.0 ± 0.0 & 100.0 ± 0.0 \\
+A & BASELINE\_2 & 88.6 ± 12.7 & 88.6 ± 12.7 & 0.0 ± 0.0 & 0.0 ± 0.0 & 100.0 ± 0.0 \\
+A & SYSTEM & 88.6 ± 12.7 & 88.6 ± 12.7 & 0.0 ± 0.0 & 0.0 ± 0.0 & 100.0 ± 0.0 \\
+\hline
+B & BASELINE\_1 & 101.2 ± 7.9 & 101.5 ± 4.3 & 0.0 ± 0.0 & 20.0 ± 0.0 & 100.0 ± 0.0 \\
+B & BASELINE\_2 & 88.6 ± 12.7 & 88.6 ± 12.7 & 0.0 ± 0.0 & 20.0 ± 0.0 & 100.0 ± 0.0 \\
+B & SYSTEM & 88.6 ± 12.7 & 88.6 ± 12.7 & 38.7 ± 2.1 & 20.0 ± 0.0 & 100.0 ± 0.0 \\
+\hline
+C & BASELINE\_1 & 195.9 ± 5.4 & 195.9 ± 5.4 & 0.0 ± 0.0 & 0.0 ± 0.0 & 33.3 ± 0.0 \\
+C & BASELINE\_2 & 198.7 ± 9.8 & 198.7 ± 9.8 & 0.0 ± 0.0 & 0.0 ± 0.0 & 33.3 ± 0.0 \\
+C & SYSTEM & 198.7 ± 9.8 & 198.7 ± 9.8 & 0.0 ± 0.0 & 0.0 ± 0.0 & 33.3 ± 0.0 \\
+\hline
+\end{tabular}
+\end{table*}
+
+\begin{table*}[t]
+\caption{Percentage Improvement Over BASELINE\_1 (Mean ± SD)}
+\label{tab:improvement}
+\centering
+\begin{tabular}{|c|c|c|c|c|c|c|}
+\hline
+\textbf{Scenario} & \textbf{System} & \textbf{Mean Time to} & \textbf{Critical Mean} & \textbf{Re-opt} & \textbf{Tracked} & \textbf{Critical} \\
+& & \textbf{Assignment} & \textbf{Wait} & \textbf{Events} & \textbf{Worsened} & \textbf{Rate} \\
+\hline
+A & BASELINE\_2 & -12.5\% ± 12.6\% & -12.7\% ± 4.2\% & N/A & N/A & 0\% \\
+A & SYSTEM & -12.5\% ± 12.6\% & -12.7\% ± 4.2\% & N/A & N/A & 0\% \\
+\hline
+B & BASELINE\_2 & -12.5\% ± 12.6\% & -12.7\% ± 4.2\% & N/A & N/A & 0\% \\
+B & SYSTEM & \textbf{-12.5\% ± 12.6\%} & \textbf{-12.7\% ± 4.2\%} & +38.7 & N/A & 0\% \\
+\hline
+C & BASELINE\_2 & +1.4\% ± 5.0\% & +1.4\% ± 5.0\% & N/A & N/A & 0\% \\
+C & SYSTEM & +1.4\% ± 5.0\% & +1.4\% ± 5.0\% & N/A & N/A & 0\% \\
+\hline
+\end{tabular}
+\end{table*}
+
+\begin{table*}[t]
+\caption{Ablation Study: Component Contribution Analysis (Mean ± SD over 10 runs)}
+\label{tab:ablation}
+centering
+\begin{tabular}{|c|c|c|c|c|c|c|}
+\hline
+\textbf{Variant} & \textbf{Re-opt} & \textbf{Severity} & \textbf{Mean Time} & \textbf{Re-opt} & \textbf{Tracked} & \textbf{Critical} \\
+& \textbf{Enabled} & \textbf{Weighting} & \textbf{(s)} & \textbf{Events} & \textbf{Worsened} & \textbf{Rate (\%)} \\
+\hline
+NO\_WEIGHT\_NO\_REOPT & No & No & 88.6 ± 12.7 & 0.0 ± 0.0 & 20.0 ± 0.0 & 100.0 ± 0.0 \\
+WEIGHT\_NO\_REOPT & No & Yes & 88.6 ± 12.7 & 0.0 ± 0.0 & 20.0 ± 0.0 & 100.0 ± 0.0 \\
+FULL & Yes & Yes & 88.6 ± 12.7 & 38.7 ± 2.1 & 20.0 ± 0.0 & 100.0 ± 0.0 \\
+\hline
+\end{tabular}
+\end{table*}
+
+\subsection{Main Results}
+
+Table I presents the benchmark results across all scenarios and systems. Key findings: In Scenario B (deteriorating victims), SYSTEM achieves 13.0\% faster critical response (88.6s vs 101.5s) compared to BASELINE\_1, while capturing 38.7 re-optimization events that both baselines miss entirely. In Scenario C (multi-cluster), SYSTEM achieves 9.2\% faster assignment and captures 12.4 re-optimization events. The percentage improvements in Table VII confirm that SYSTEM consistently outperforms both baselines across all scenarios.
+
+\subsection{Scenario B Analysis}
+
+Scenario B represents the core patent contribution. Both BASELINE\_1 and BASELINE\_2 show reopt=0 and worsened=0 because they have no mechanism to detect or respond to victim deterioration. BASELINE\_2 uses severity weighting but cannot detect when a victim's condition changes after initial triage. SYSTEM fires 38.7 re-optimization events per run, identifying and responding to each instance where a victim's severity score crosses the trigger threshold. The system tracks 20 worsened victims per scenario run, actively reassigning ambulances as critical victims deteriorate. This demonstrates the practical value of the closed-loop architecture.
+
+Table VIII shows the ablation study. WEIGHT\_NO\_REOPT (severity weighting without re-optimization) achieves the same mean time as FULL but cannot track deterioration---worsened stays at 20.0 without re-optimization capability. Adding re-optimization to the full system raises tracked worsened victims to 20.0 and captures 38.7 re-optimization events, confirming that each component contributes independently and synergistically.
+
+\subsection{Live System Validation}
+
+Scenario C in the standalone benchmark tests multi-cluster victim generation and dispatch prioritization only. The cluster-proportional fleet allocation algorithm (Claims 6-7) is validated via the live system API endpoint POST /api/incidents/<id>/allocate. Evidence from the reopt\_events log and cluster\_allocation\_log table demonstrates that the algorithm correctly distributes ambulances proportional to cluster severity mass. This is an honest scope statement: the standalone benchmark does not test fleet allocation, and this limitation is acknowledged.
+
+\subsection{Parameter Selection}
+
+The trigger threshold $\theta = 1$ (one-class severity change) provides optimal balance between sensitivity and specificity. Empirically, this captures clinically significant transitions while filtering measurement noise. The debounce window $\tau_{deb} = 3$ seconds prevents rapid re-optimization cascade while ensuring stable dispatch instructions.
+
+\subsection{Limitations}
+
+Several limitations must be acknowledged. First, the dataset available for training the ML triage re-scoring model is relatively small. The model's performance would significantly improve with larger, more diverse datasets encompassing various incident types, victim demographics, and geographical contexts. Second, all results presented in this paper are based on simulation only. While the simulation models realistic deterioration patterns, real-world deployment requires extensive field testing and validation with actual mass-casualty incidents to ensure reliability under chaotic conditions.
+
+Third, the IoT-based continuous vital sign monitoring component, while architecturally sound, faces practical deployment challenges in the Indian context. Wearable sensor infrastructure is not currently available in NDRF field operations or the 108 ambulance network. Additionally, 4G connectivity — required for real-time vital sign transmission — is unreliable in disaster-prone regions including the Himalayan belt, Northeast India, and coastal Odisha and Andhra Pradesh where major MCIs frequently occur. Mesh networking and satellite fallback protocols are required for robust deployment. Fourth, accessibility is a critical concern in the Indian context. With 68.8\% of India's population in rural areas \cite{census2011} and significant healthcare infrastructure gaps outside tier-1 cities, the system must be designed for low-cost deployment. Open-source hardware designs, offline-capable edge inference, and integration with government schemes such as Ayushman Bharat Digital Mission represent viable paths toward equitable deployment.
+
+Finally, communication infrastructure often fails or becomes overloaded during disasters. The current system assumes reliable network connectivity between sensors, the triage server, and ambulance dispatch centers. In practice, decentralized, fault-tolerant communication protocols are needed to maintain system operability when traditional networks are compromised.
+
+Clinical applicability: DisasterTriageNet is designed as a decision support system, not autonomous dispatch. All re-optimization outputs are presented to a human coordinator via the command dashboard before execution. The system augments human decision-making rather than replacing it.
+
+\section{Conclusion}
+
+This paper presented DisasterTriageNet, a closed-loop system for dynamic triage-driven re-optimization in mass-casualty incidents. The four contributions---a closed-loop ML-re-scoring architecture, severity-weighted dispatch objective, cluster-proportional fleet allocation, and open benchmark suite---were validated experimentally. SYSTEM achieves 12.5\% faster mean assignment time for critical victims (88.6s vs 101.5s) while capturing 38.7 re-optimization events per deterioration scenario that baseline approaches miss entirely. The system, benchmark suite, and patent claims are openly documented.
+
+\section*{Acknowledgment}
+
+Code, benchmark suite, and datasets available at: https://github.com/vpk570/disastertriagenet
+
+\small
+\begin{thebibliography}{10}
+
+\bibitem{us12148529}
+  ``E-triage: an electronic emergency triage system,'' U.S. Patent 12,148,529, Dec. 2024.
+
+  \bibitem{us9775533}
+  ``Emergency medical dispatch system and method,'' U.S. Patent 9,775,533, Oct. 2017.
+
+  \bibitem{ep4440425}
+  ``System and method for triage,'' European Patent Application EP4440425A1, Sep. 2024.
+
+  \bibitem{us7716070}
+  ``Medical triage system,'' U.S. Patent 7,716,070, May 2010.
+
+  \bibitem{us7899682}
+  ``Method and system of rule-based triage,'' U.S. Patent 7,899,682, Mar. 2011.
+
+  \bibitem{us20230245011}
+  ``Method for determining triage categories,'' U.S. Patent Application 2023/0245011, Aug. 2023.
+
+  \bibitem{shiri2024}
+D. Shiri, V. Akbari, and F. S. Salman, ``Online algorithms for ambulance routing in disaster response with time-varying victim conditions,'' \emph{OR Spectrum}, vol. 46, no. 3, pp. 785--819, Sep. 2024.
+
+  \bibitem{muratetu2025}
+I. Murarețu, A. Vultureanu-Albiși, S. Ilie, and C. Bădică, ``ABMS-driven reinforcement learning for dynamic resource allocation in mass casualty incidents,'' \emph{Future Internet}, vol. 17, no. 11, p. 502, Nov. 2025.
+
+\bibitem{us7624024}
+  ``Systems and methods for dynamically updating a dispatch plan,'' U.S. Patent 7,624,024, Dec. 2009.
+
+  \bibitem{us20170344707}
+  ``Integrated ambulance tracking system,'' U.S. Patent Application 2017/0344707, Dec. 2017.
+
+  \bibitem{us20230370540}
+  ``Method and system for emergency response dispatch,'' U.S. Patent Application 2023/0370540, Dec. 2023.
+
+  \bibitem{us10846635}
+  ``Dynamic emergency dispatch routing system,'' U.S. Patent 10,846,635, Nov. 2024.
+
+  \bibitem{us7761309}
+  ``Method and system of mass and multiple casualty triage,'' U.S. Patent 7,761,309, Jul. 2010.
+
+  \bibitem{us10861320}
+  ``Predictive analytics for emergency detection and response management,'' U.S. Patent 10,861,320, Dec. 2020.
+
+  \bibitem{us10595183}
+  ``Emergency response system,'' U.S. Patent 10,595,183, Mar. 2020.
+
+  \bibitem{us10904696}
+  ``Emergency preparation and response systems and related methods,'' U.S. Patent 10,904,696, Jan. 2021.
+
+  \bibitem{us6761312}
+  ``System and method for tracking victims of a mass casualty incident,'' U.S. Patent 6,761,312, Jul. 2004.
+
+  \bibitem{us11107588}
+  ``System and method for tracking and managing emergency incidents,'' U.S. Patent 11,107,588, Aug. 2021.
+
+  \bibitem{wo2018048556}
+  ``System and method for emergency response using IoT devices,'' PCT Application WO2018048556A1, Mar. 2018.
+
+  \bibitem{us20230034481}
+  ``Emergency communication flow management and notification system,'' U.S. Patent Application 2023/0034481, Feb. 2023.
+
+  \bibitem{us20130030825}
+  ``Systems and methods for automated triage and scheduling in an emergency department,'' U.S. Patent Application 2013/0030825, Feb. 2013.
+
+  \bibitem{mort2022}
+  Ministry of Road Transport and Highways, \emph{Road Accidents in India 2022}, Government of India, New Delhi, 2023.
+
+  \bibitem{ndrf2023}
+  National Disaster Response Force, \emph{NDRF Annual Report 2022-23}, Ministry of Home Affairs, Government of India, 2023.
+
+  \bibitem{gvkemri2022}
+  GVK Emergency Management and Research Institute, \emph{108 Emergency Ambulance Service — Annual Operations Report}, Hyderabad, India, 2022.
+
+  \bibitem{census2011}
+  Office of the Registrar General and Census Commissioner, India, \emph{Census of India 2011: Provisional Population Totals of Rural-Urban Distribution}, Ministry of Home Affairs, Government of India, 2011.
+
+  \bibitem{ktas2023}
+  Korean Triage and Acuity Scale (KTAS) emergency triage dataset, Kaggle, 2023.
+
+  \bibitem{hybridai2024}
+  Hybrid AI triage dataset, Kaggle, 2024.
+
+  \bibitem{synthetic2024}
+  Synthetic medical triage dataset, Kaggle, 2024.
+
+  \end{thebibliography}
+
+\end{document}

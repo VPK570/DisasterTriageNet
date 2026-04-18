@@ -1,13 +1,7 @@
-import sqlite3
-import os
-from config import DB_PATH
-
-def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
-    return conn
+from lib.db import get_db_connection
 
 def create_user(user_id, name, email, password_hash, role, created_at):
+    import sqlite3
     conn = None
     try:
         conn = get_db_connection()
@@ -17,7 +11,7 @@ def create_user(user_id, name, email, password_hash, role, created_at):
         ''', (user_id, name, email, password_hash, role, created_at))
         conn.commit()
     except sqlite3.IntegrityError:
-        return False # Email likely exists
+        return False
     finally:
         if conn:
             conn.close()

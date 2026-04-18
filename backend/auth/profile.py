@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
-from middleware.role_guard import require_role
-from models.user_model import get_user_by_id
+from lib.role_guard import require_role
+from lib.user_model import get_user_by_id
 
 profile_bp = Blueprint('profile', __name__)
 

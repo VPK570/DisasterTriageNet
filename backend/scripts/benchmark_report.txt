@@ -1,0 +1,140 @@
+================================================================================
+DisasterTriageNet Benchmark Report
+Generated: 2026-04-14T00:24:33.222773
+Number of runs: 10
+================================================================================
+
+NOTE: Scenario C in this benchmark tests multi-cluster victim
+generation and dispatch prioritization only. Cluster-proportional
+ambulance allocation (Claims 6-7) is validated via the live system
+endpoint POST /api/incidents/<id>/allocate — see reopt_events log
+and cluster_allocation_log table for evidence.
+
+MAIN BENCHMARK RESULTS (Mean ± SD)
+--------------------------------------------------------------------------------
+
+SCENARIO_A
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  BASELINE_1:
+    Mean Time to Assignment:     101.17 ± 7.88s
+    Reopt Events Fired:        0.0 ± 0.0
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           0.0 ± 0.0
+    Severity-Weighted Score:  221.51 ± 113.70
+    Critical Mean Wait:         101.48 ± 4.25s
+    Critical Response Rate:    100.0 ± 0.0%
+
+  BASELINE_2:
+    Mean Time to Assignment:     88.62 ± 12.73s
+    Reopt Events Fired:        0.0 ± 0.0
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           0.0 ± 0.0
+    Severity-Weighted Score:  354.47 ± 50.91
+    Critical Mean Wait:         88.62 ± 12.73s
+    Critical Response Rate:    100.0 ± 0.0%
+
+  SYSTEM:
+    Mean Time to Assignment:     88.62 ± 12.73s
+    Reopt Events Fired:        0.0 ± 0.0
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           0.0 ± 0.0
+    Severity-Weighted Score:  354.47 ± 50.91
+    Critical Mean Wait:         88.62 ± 12.73s
+    Critical Response Rate:    100.0 ± 0.0%
+
+
+SCENARIO_B
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  BASELINE_1:
+    Mean Time to Assignment:     101.17 ± 7.88s
+    Reopt Events Fired:        0.0 ± 0.0
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           20.0 ± 0.0
+    Severity-Weighted Score:  221.51 ± 113.70
+    Critical Mean Wait:         101.48 ± 4.25s
+    Critical Response Rate:    100.0 ± 0.0%
+
+  BASELINE_2:
+    Mean Time to Assignment:     88.62 ± 12.73s
+    Reopt Events Fired:        0.0 ± 0.0
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           20.0 ± 0.0
+    Severity-Weighted Score:  354.47 ± 50.91
+    Critical Mean Wait:         88.62 ± 12.73s
+    Critical Response Rate:    100.0 ± 0.0%
+
+  SYSTEM:
+    Mean Time to Assignment:     88.62 ± 12.73s
+    Reopt Events Fired:        38.7 ± 2.1
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           20.0 ± 0.0
+    Severity-Weighted Score:  354.47 ± 50.91
+    Critical Mean Wait:         88.62 ± 12.73s
+    Critical Response Rate:    100.0 ± 0.0%
+
+
+SCENARIO_C
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  BASELINE_1:
+    Mean Time to Assignment:     195.94 ± 5.43s
+    Reopt Events Fired:        0.0 ± 0.0
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           0.0 ± 0.0
+    Severity-Weighted Score:  677.32 ± 55.25
+    Critical Mean Wait:         195.94 ± 5.43s
+    Critical Response Rate:    33.3 ± 0.0%
+
+  BASELINE_2:
+    Mean Time to Assignment:     198.73 ± 9.80s
+    Reopt Events Fired:        0.0 ± 0.0
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           0.0 ± 0.0
+    Severity-Weighted Score:  794.92 ± 39.19
+    Critical Mean Wait:         198.73 ± 9.80s
+    Critical Response Rate:    33.3 ± 0.0%
+
+  SYSTEM:
+    Mean Time to Assignment:     198.73 ± 9.80s
+    Reopt Events Fired:        0.0 ± 0.0
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           0.0 ± 0.0
+    Severity-Weighted Score:  794.92 ± 39.19
+    Critical Mean Wait:         198.73 ± 9.80s
+    Critical Response Rate:    33.3 ± 0.0%
+
+
+================================================================================
+ABLATION STUDY RESULTS (Mean ± SD)
+--------------------------------------------------------------------------------
+
+ABLATION_NO_WEIGHT_NO_REOPT (Scenario B)
+  Severity Weight: No, Re-optimization: No
+    Mean Time to Assignment:     88.62 ± 12.73s
+    Reopt Events Fired:        0.0 ± 0.0
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           20.0 ± 0.0
+    Severity-Weighted Score:  354.47 ± 50.91
+    Critical Mean Wait:         88.62 ± 12.73s
+    Critical Response Rate:    100.0 ± 0.0%
+
+
+ABLATION_WEIGHT_NO_REOPT (Scenario B)
+  Severity Weight: Yes, Re-optimization: No
+    Mean Time to Assignment:     88.62 ± 12.73s
+    Reopt Events Fired:        0.0 ± 0.0
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           20.0 ± 0.0
+    Severity-Weighted Score:  354.47 ± 50.91
+    Critical Mean Wait:         88.62 ± 12.73s
+    Critical Response Rate:    100.0 ± 0.0%
+
+
+ABLATION_FULL (Scenario B)
+  Severity Weight: Yes, Re-optimization: Yes
+    Mean Time to Assignment:     88.62 ± 12.73s
+    Reopt Events Fired:        38.7 ± 2.1
+    Ambulance Utilization:     100.0 ± 0.0%
+    Victims Worsened:           20.0 ± 0.0
+    Severity-Weighted Score:  354.47 ± 50.91
+    Critical Mean Wait:         88.62 ± 12.73s
+    Critical Response Rate:    100.0 ± 0.0%
