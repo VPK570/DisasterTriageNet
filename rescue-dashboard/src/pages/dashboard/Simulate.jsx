@@ -1,240 +1,259 @@
-import { useState, useCallback } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { Play, RotateCcw, Activity, Truck, Users, Clock, AlertTriangle } from 'lucide-react';
-import { runSimulation } from '@/lib/simulation';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Play, Pause, RotateCcw, Activity, Clock, Users, Truck, AlertTriangle, TrendingUp } from 'lucide-react';
+import { createSimulation, SimulationEngine } from '@/lib/liveSimulation';
+import LiveSimulationMap from '@/components/simulation/LiveSimulationMap';
+import SimulationControls from '@/components/simulation/SimulationControls';
+import SimulationStats from '@/components/simulation/SimulationStats';
+import EventFeed from '@/components/simulation/EventFeed';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-const SYSTEM_COLORS = {
-  BASELINE_1: '#64748b',
-  BASELINE_2: '#3b82f6',
-  SYSTEM: '#6366f1',
+const SEVERITY_COLORS = {
+  0: '#22c55e',
+  1: '#eab308',
+  2: '#3b82f6',
+  3: '#f43f5e',
 };
 
 export default function SimulatePage() {
-  const [config, setConfig] = useState({
-    numVictims: 20,
-    numAmbulances: 1,
-    scenario: 'A',
-    includeDeterioration: false,
-  });
-  const [results, setResults] = useState(null);
-  const [running, setRunning] = useState(false);
+  const [mode, setMode] = useState('static');
+  const [engine, setEngine] = useState(null);
+  const [state, setState] = useState(null);
+  const [staticResults, setStaticResults] = useState(null);
+  const engineRef = useRef(null);
 
-  const handleRun = useCallback(() => {
-    setRunning(true);
-    setTimeout(() => {
-      const simResults = runSimulation(config);
-      setResults(simResults);
-      setRunning(false);
-    }, 500);
+  const [config, setConfig] = useState({
+    victimSpawnRate: 2,
+    maxVictims: 50,
+    enableDeterioration: true,
+    enableAutoDispatch: true,
+    scenario: 'A',
+    ambulanceCount: 1,
+  });
+
+  const handleStart = useCallback(() => {
+    if (!engineRef.current) {
+      const eng = createSimulation(config);
+      engineRef.current = eng;
+      setEngine(eng);
+    }
+    engineRef.current.start();
+    setState(engineRef.current.getState());
   }, [config]);
 
-  const handleReset = () => {
-    setConfig({
-      numVictims: 20,
-      numAmbulances: 1,
-      scenario: 'A',
-      includeDeterioration: false,
-    });
-    setResults(null);
+  const handlePause = useCallback(() => {
+    if (engineRef.current) {
+      engineRef.current.pause();
+      setState(engineRef.current.getState());
+    }
+  }, []);
+
+  const handleReset = useCallback(() => {
+    if (engineRef.current) {
+      engineRef.current.pause();
+      engineRef.current.reset();
+      setState(engineRef.current.getState());
+    }
+  }, []);
+
+  const handleSpeedChange = useCallback((speed) => {
+    if (engineRef.current) {
+      engineRef.current.setSpeed(speed);
+      setState(engineRef.current.getState());
+    }
+  }, []);
+
+  const handleConfigChange = useCallback((newConfig) => {
+    setConfig(newConfig);
+    if (engineRef.current && !state?.running) {
+      engineRef.current.pause();
+      const newEngine = createSimulation(newConfig);
+      engineRef.current = newEngine;
+      setEngine(newEngine);
+      setState(newEngine.getState());
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!engineRef.current) return;
+    const interval = setInterval(() => {
+      if (engineRef.current.getState()?.running) {
+        engineRef.current.tick();
+        setState({ ...engineRef.current.getState() });
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const { runSimulation } = require('@/lib/simulation');
+    const results = runSimulation(config);
+    setStaticResults(results);
+  }, [config]);
+
+  const formatTime = (tick) => {
+    const mins = Math.floor(tick / 60);
+    const secs = tick % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  const chartData = results ? [
-    { name: 'BASELINE_1', time: results.BASELINE_1.mean_time_to_assignment, color: SYSTEM_COLORS.BASELINE_1 },
-    { name: 'BASELINE_2', time: results.BASELINE_2.mean_time_to_assignment, color: SYSTEM_COLORS.BASELINE_2 },
-    { name: 'SYSTEM', time: results.SYSTEM.mean_time_to_assignment, color: SYSTEM_COLORS.SYSTEM },
+  const staticChartData = staticResults ? [
+    { name: 'BASELINE_1', time: staticResults.BASELINE_1.mean_time_to_assignment, color: '#64748b' },
+    { name: 'BASELINE_2', time: staticResults.BASELINE_2.mean_time_to_assignment, color: '#3b82f6' },
+    { name: 'SYSTEM', time: staticResults.SYSTEM.mean_time_to_assignment, color: '#6366f1' },
   ] : [];
 
+  const victims = state?.victims || new Map();
+  const ambulances = state?.ambulances || new Map();
+  const events = state?.events || [];
+  const metrics = state?.metrics || {
+    totalIngested: 0,
+    totalAssigned: 0,
+    totalDelivered: 0,
+    criticalCount: 0,
+    avgResponseTime: 0,
+    ambulanceUtilization: 0,
+  };
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Simulation Playground</h1>
-          <p className="text-muted-foreground">Run dispatch scenarios and compare algorithms</p>
+          <h1 className="text-2xl font-bold">Simulation</h1>
+          <p className="text-muted-foreground">Test dispatch algorithms in real-time</p>
         </div>
-        <Button variant="outline" size="sm" onClick={handleReset}>
-          <RotateCcw className="mr-2 h-4 w-4" />
-          Reset
-        </Button>
+        <Tabs value={mode} onValueChange={setMode} className="w-[300px]">
+          <TabsList className="w-full">
+            <TabsTrigger value="static" className="flex-1">
+              <TrendingUp className="w-4 h-4 mr-2" />
+              Static
+            </TabsTrigger>
+            <TabsTrigger value="live" className="flex-1">
+              <Play className="w-4 h-4 mr-2" />
+              Live
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="h-5 w-5" />
-              Configuration
-            </CardTitle>
-            <CardDescription>Set simulation parameters</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="flex items-center gap-2">
+      {mode === 'static' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card className="lg:col-span-1">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5" />
+                Configuration
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
                   <Users className="h-4 w-4" />
-                  Victims
-                </Label>
-                <Badge variant="secondary">{config.numVictims}</Badge>
+                  Victims: {config.numVictims}
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="50"
+                  value={config.numVictims}
+                  onChange={(e) => setConfig({ ...config, numVictims: parseInt(e.target.value) })}
+                  className="w-full"
+                />
               </div>
-              <Slider
-                value={[config.numVictims]}
-                onValueChange={([v]) => setConfig(c => ({ ...c, numVictims: v }))}
-                min={1}
-                max={50}
-                step={1}
-              />
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="flex items-center gap-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
                   <Truck className="h-4 w-4" />
-                  Ambulances
-                </Label>
-                <Badge variant="secondary">{config.numAmbulances}</Badge>
+                  Ambulances: {config.numAmbulances}
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  value={config.numAmbulances}
+                  onChange={(e) => setConfig({ ...config, numAmbulances: parseInt(e.target.value) })}
+                  className="w-full"
+                />
               </div>
-              <Slider
-                value={[config.numAmbulances]}
-                onValueChange={([v]) => setConfig(c => ({ ...c, numAmbulances: v }))}
-                min={1}
-                max={10}
-                step={1}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4" />
-                Scenario
-              </Label>
-              <Select
-                value={config.scenario}
-                onValueChange={(v) => setConfig(c => ({ ...c, scenario: v }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="A">A - Single Cluster (Stable)</SelectItem>
-                  <SelectItem value="B">B - Single Cluster (Deteriorating)</SelectItem>
-                  <SelectItem value="C">C - Two Clusters</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Button
-              className="w-full"
-              onClick={handleRun}
-              disabled={running}
-              size="lg"
-            >
-              {running ? (
-                <RotateCcw className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="mr-2 h-4 w-4" />
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  Scenario
+                </label>
+                <select
+                  value={config.scenario}
+                  onChange={(e) => setConfig({ ...config, scenario: e.target.value })}
+                  className="w-full p-2 rounded-md bg-background border"
+                >
+                  <option value="A">A - Single Cluster (Stable)</option>
+                  <option value="B">B - Single Cluster (Deteriorating)</option>
+                  <option value="C">C - Two Clusters</option>
+                </select>
+              </div>
+              {staticResults && (
+                <div className="grid grid-cols-3 gap-2 pt-4">
+                  <div className="p-3 rounded-lg bg-muted text-center">
+                    <p className="text-xs text-muted-foreground">BASELINE_1</p>
+                    <p className="text-lg font-bold">{staticResults.BASELINE_1.mean_time_to_assignment.toFixed(1)}s</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted text-center">
+                    <p className="text-xs text-muted-foreground">BASELINE_2</p>
+                    <p className="text-lg font-bold">{staticResults.BASELINE_2.mean_time_to_assignment.toFixed(1)}s</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted text-center">
+                    <p className="text-xs text-muted-foreground">SYSTEM</p>
+                    <p className="text-lg font-bold">{staticResults.SYSTEM.mean_time_to_assignment.toFixed(1)}s</p>
+                  </div>
+                </div>
               )}
-              Run Simulation
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Results</CardTitle>
-            <CardDescription>Mean time to dispatch (seconds)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {!results ? (
-              <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+            </CardContent>
+          </Card>
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Results</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[400px] flex items-center justify-center text-muted-foreground">
                 <div className="text-center">
                   <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Configure and run simulation to see results</p>
+                  <p>Static mode - shows aggregate results</p>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-6">
-                <div className="h-[250px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} layout="vertical">
-                      <XAxis type="number" domain={[0, 300]} tickFormatter={(v) => `${v}s`} />
-                      <YAxis type="category" dataKey="name" width={100} />
-                      <Tooltip
-                        formatter={(value) => [`${value.toFixed(1)}s`, 'Mean Time']}
-                        contentStyle={{
-                          backgroundColor: 'var(--card)',
-                          border: '1px solid var(--border)',
-                          borderRadius: '8px',
-                        }}
-                      />
-                      <Bar dataKey="time" radius={[0, 4, 4, 0]}>
-                        {chartData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="p-4 rounded-lg bg-muted/50">
-                    <p className="text-xs text-muted-foreground uppercase mb-1">BASELINE_1</p>
-                    <p className="text-2xl font-bold">{results.BASELINE_1.mean_time_to_assignment.toFixed(1)}s</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {results.BASELINE_1.assigned_count} assigned
-                    </p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-muted/50">
-                    <p className="text-xs text-muted-foreground uppercase mb-1">BASELINE_2</p>
-                    <p className="text-2xl font-bold">{results.BASELINE_2.mean_time_to_assignment.toFixed(1)}s</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {results.BASELINE_2.assigned_count} assigned
-                    </p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-muted/50">
-                    <p className="text-xs text-muted-foreground uppercase mb-1">SYSTEM</p>
-                    <p className="text-2xl font-bold">{results.SYSTEM.mean_time_to_assignment.toFixed(1)}s</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {results.SYSTEM.assigned_count} assigned
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="p-3 rounded-lg border">
-                    <p className="text-xs text-muted-foreground">Utilization</p>
-                    <p className="text-xl font-semibold">{results.SYSTEM.ambulance_utilization.toFixed(0)}%</p>
-                  </div>
-                  <div className="p-3 rounded-lg border">
-                    <p className="text-xs text-muted-foreground">Worsened</p>
-                    <p className="text-xl font-semibold">{results.SYSTEM.victims_worsened}</p>
-                  </div>
-                  <div className="p-3 rounded-lg border">
-                    <p className="text-xs text-muted-foreground">Critical Wait</p>
-                    <p className="text-xl font-semibold">
-                      {results.SYSTEM.critical_mean_wait
-                        ? `${results.SYSTEM.critical_mean_wait.toFixed(1)}s`
-                        : 'N/A'}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-lg border">
-                    <p className="text-xs text-muted-foreground">Critical Response</p>
-                    <p className="text-xl font-semibold">
-                      {results.SYSTEM.critical_response_rate
-                        ? `${(results.SYSTEM.critical_response_rate * 100).toFixed(0)}%`
-                        : 'N/A'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <SimulationControls
+            config={config}
+            running={state?.running || false}
+            speed={state?.speed || 1}
+            onConfigChange={handleConfigChange}
+            onStart={handleStart}
+            onPause={handlePause}
+            onReset={handleReset}
+            onSpeedChange={handleSpeedChange}
+          />
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <div className="lg:col-span-3">
+              <LiveSimulationMap
+                victims={victims}
+                ambulances={ambulances}
+              />
+            </div>
+            <div className="space-y-4">
+              <SimulationStats
+                tick={state?.tick || 0}
+                running={state?.running || false}
+                speed={state?.speed || 1}
+                metrics={metrics}
+                victimCount={victims.size}
+                ambulanceCount={ambulances.size}
+              />
+              <EventFeed events={events} maxEvents={30} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
