@@ -1,50 +1,60 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Play, Pause, RotateCcw, Activity, Clock, Users, Truck, AlertTriangle, TrendingUp } from 'lucide-react';
-import { createSimulation, SimulationEngine } from '@/lib/liveSimulation';
+import { Play, Pause, RotateCcw, Activity, Users, Truck, AlertTriangle, TrendingUp } from 'lucide-react';
+import { createSimulation } from '@/lib/liveSimulation';
 import LiveSimulationMap from '@/components/simulation/LiveSimulationMap';
 import SimulationControls from '@/components/simulation/SimulationControls';
 import SimulationStats from '@/components/simulation/SimulationStats';
 import EventFeed from '@/components/simulation/EventFeed';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-
-const SEVERITY_COLORS = {
-  0: '#22c55e',
-  1: '#eab308',
-  2: '#3b82f6',
-  3: '#f43f5e',
-};
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function SimulatePage() {
-  const [mode, setMode] = useState('static');
-  const [engine, setEngine] = useState(null);
+  const [mode, setMode] = useState('live');
   const [state, setState] = useState(null);
   const [staticResults, setStaticResults] = useState(null);
   const engineRef = useRef(null);
 
   const [config, setConfig] = useState({
+    scenario: 'A',
+    ambulanceCount: 1,
     victimSpawnRate: 2,
     maxVictims: 50,
     enableDeterioration: true,
     enableAutoDispatch: true,
-    scenario: 'A',
-    ambulanceCount: 1,
   });
 
-  const handleStart = useCallback(() => {
-    if (!engineRef.current) {
-      const eng = createSimulation(config);
-      engineRef.current = eng;
-      setEngine(eng);
+  useEffect(() => {
+    const { runSimulation } = require('@/lib/simulation');
+    try {
+      const results = runSimulation({
+        numVictims: config.maxVictims,
+        numAmbulances: config.ambulanceCount,
+        scenario: config.scenario,
+        includeDeterioration: config.enableDeterioration,
+      });
+      setStaticResults(results);
+    } catch (e) {
+      console.error('Static simulation error:', e);
     }
-    engineRef.current.start();
-    setState(engineRef.current.getState());
   }, [config]);
+
+  useEffect(() => {
+    const eng = createSimulation(config);
+    engineRef.current = eng;
+    setState(eng.getState());
+  }, []);
+
+  const handleStart = useCallback(() => {
+    if (engineRef.current) {
+      engineRef.current.start();
+      setState({ ...engineRef.current.getState(), running: true });
+    }
+  }, []);
 
   const handlePause = useCallback(() => {
     if (engineRef.current) {
       engineRef.current.pause();
-      setState(engineRef.current.getState());
+      setState({ ...engineRef.current.getState(), running: false });
     }
   }, []);
 
@@ -65,43 +75,32 @@ export default function SimulatePage() {
 
   const handleConfigChange = useCallback((newConfig) => {
     setConfig(newConfig);
-    if (engineRef.current && !state?.running) {
+    if (engineRef.current) {
       engineRef.current.pause();
-      const newEngine = createSimulation(newConfig);
-      engineRef.current = newEngine;
-      setEngine(newEngine);
-      setState(newEngine.getState());
+      const newEng = createSimulation(newConfig);
+      engineRef.current = newEng;
+      setState(newEng.getState());
     }
   }, []);
 
   useEffect(() => {
-    if (!engineRef.current) return;
+    if (!state?.running || !engineRef.current) return;
+    
     const interval = setInterval(() => {
-      if (engineRef.current.getState()?.running) {
+      if (engineRef.current && engineRef.current.getState().running) {
         engineRef.current.tick();
         setState({ ...engineRef.current.getState() });
       }
-    }, 1000);
+    }, 1000 / (state.speed || 1));
+    
     return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const { runSimulation } = require('@/lib/simulation');
-    const results = runSimulation(config);
-    setStaticResults(results);
-  }, [config]);
+  }, [state?.running, state?.speed]);
 
   const formatTime = (tick) => {
     const mins = Math.floor(tick / 60);
     const secs = tick % 60;
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
-
-  const staticChartData = staticResults ? [
-    { name: 'BASELINE_1', time: staticResults.BASELINE_1.mean_time_to_assignment, color: '#64748b' },
-    { name: 'BASELINE_2', time: staticResults.BASELINE_2.mean_time_to_assignment, color: '#3b82f6' },
-    { name: 'SYSTEM', time: staticResults.SYSTEM.mean_time_to_assignment, color: '#6366f1' },
-  ] : [];
 
   const victims = state?.victims || new Map();
   const ambulances = state?.ambulances || new Map();
@@ -149,28 +148,28 @@ export default function SimulatePage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium flex items-center gap-2">
                   <Users className="h-4 w-4" />
-                  Victims: {config.numVictims}
+                  Victims: {config.maxVictims}
                 </label>
                 <input
                   type="range"
                   min="1"
                   max="50"
-                  value={config.numVictims}
-                  onChange={(e) => setConfig({ ...config, numVictims: parseInt(e.target.value) })}
+                  value={config.maxVictims}
+                  onChange={(e) => setConfig({ ...config, maxVictims: parseInt(e.target.value) })}
                   className="w-full"
                 />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium flex items-center gap-2">
                   <Truck className="h-4 w-4" />
-                  Ambulances: {config.numAmbulances}
+                  Ambulances: {config.ambulanceCount}
                 </label>
                 <input
                   type="range"
                   min="1"
                   max="10"
-                  value={config.numAmbulances}
-                  onChange={(e) => setConfig({ ...config, numAmbulances: parseInt(e.target.value) })}
+                  value={config.ambulanceCount}
+                  onChange={(e) => setConfig({ ...config, ambulanceCount: parseInt(e.target.value) })}
                   className="w-full"
                 />
               </div>
@@ -234,7 +233,7 @@ export default function SimulatePage() {
             onSpeedChange={handleSpeedChange}
           />
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-            <div className="lg:col-span-3">
+            <div className="lg:col-span-3 h-[600px]">
               <LiveSimulationMap
                 victims={victims}
                 ambulances={ambulances}
@@ -242,7 +241,7 @@ export default function SimulatePage() {
             </div>
             <div className="space-y-4">
               <SimulationStats
-                tick={state?.tick || 0}
+                tick={state?.tickCount || 0}
                 running={state?.running || false}
                 speed={state?.speed || 1}
                 metrics={metrics}
