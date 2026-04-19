@@ -1,54 +1,57 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
-import {
-  AlertTriangle, Activity, MapPin, QrCode,
-  Users, AlertOctagon, ChevronLeft, ChevronRight, Filter, Lock,
-} from 'lucide-react';
-
+import { AlertTriangle, Activity, MapPin, Lock } from 'lucide-react';
 import { API_BASE, SEVERITY_COLORS } from './config';
 import { socket } from './socket';
 import VictimCard from './components/VictimCard';
-import MapView from './components/MapView';
-import AmbulancePanel from './components/AmbulancePanel';
-import IncidentTimeline from './components/IncidentTimeline';
+import MainLayout from './components/layout/MainLayout';
+import LoginPage from './pages/login/LoginPage';
+import VictimCardPage from './pages/login/VictimCardPage';
 
-// ---------------------------------------------------------------------------
-// App
-// ---------------------------------------------------------------------------
-export default function App() {
-  // --- Auth state ---
-  const [token,    setToken]    = useState(localStorage.getItem('token'));
+const DashboardPage = lazy(() => import('./pages/dashboard/DashboardPage'));
+const VictimsPage = lazy(() => import('./pages/dashboard/Victims'));
+const HospitalsPage = lazy(() => import('./pages/dashboard/Hospitals'));
+const AmbulancesPage = lazy(() => import('./pages/dashboard/Ambulances'));
+const IncidentsPage = lazy(() => import('./pages/dashboard/Incidents'));
+const SettingsPage = lazy(() => import('./pages/dashboard/Settings'));
+
+function LoadingFallback() {
+  return (
+    <div className="h-full flex items-center justify-center bg-slate-950">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-12 h-12 border-4 border-red-500/30 border-t-red-500 rounded-full animate-spin" />
+        <p className="text-slate-500 text-sm font-medium uppercase tracking-widest">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [token, setToken] = useState(localStorage.getItem('token'));
   const [userRole, setUserRole] = useState(localStorage.getItem('userRole') || 'admin');
+  const [userEmail, setUserEmail] = useState('');
+  const [muted, setMuted] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [soundAlertsEnabled, setSoundAlertsEnabled] = useState(true);
 
-  // --- Login form state ---
-  const [loginEmail,    setLoginEmail]    = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [loginError,    setLoginError]    = useState('');
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [registerName,  setRegisterName]  = useState('');
-  const [registerRole,  setRegisterRole]  = useState('responder');
-
-  // --- Dashboard state ---
-  const [victims,      setVictims]      = useState([]);
-  const [mapVictims,   setMapVictims]   = useState([]);
-  const [victimsMeta,  setVictimsMeta]  = useState({ total: 0, page: 1, pages: 1, limit: 50 });
-  const [currentPage,  setCurrentPage]  = useState(1);
+  const [victims, setVictims] = useState([]);
+  const [mapVictims, setMapVictims] = useState([]);
+  const [victimsMeta, setVictimsMeta] = useState({ total: 0, page: 1, pages: 1, limit: 50 });
   const [filterSeverity, setFilterSeverity] = useState(null);
-  const [clusters,     setClusters]     = useState([]);
-  const [hospitals,    setHospitals]    = useState([]);
-  const [ambulances,   setAmbulances]   = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [muted,        setMuted]        = useState(false);
-  const [qrData,       setQrData]       = useState({});
-  const [incidents,    setIncidents]    = useState([]);
+  const [clusters, setClusters] = useState([]);
+  const [hospitals, setHospitals] = useState([]);
+  const [ambulances, setAmbulances] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [activeIncident, setActiveIncident] = useState(null);
-  const [activeRoute,  setActiveRoute]  = useState(null);
-  const [routeLoading, setRouteLoading] = useState(false);
+  const [incidents, setIncidents] = useState([]);
   const [selectedAmbulance, setSelectedAmbulance] = useState(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [activeRoute, setActiveRoute] = useState(null);
 
-  // ---------------------------------------------------------------------------
-  // API helper — attaches auth header, handles 401 logout
-  // ---------------------------------------------------------------------------
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const apiFetch = useCallback(async (url, options = {}) => {
     const res = await fetch(url, {
       ...options,
@@ -59,7 +62,6 @@ export default function App() {
       },
     });
     if (res.status === 401) {
-      alert(`API 401 Unauthorized on: ${url}. Logging out.`);
       setToken(null);
       setUserRole(null);
       localStorage.removeItem('token');
@@ -68,100 +70,70 @@ export default function App() {
     return res;
   }, [token]);
 
-  // ---------------------------------------------------------------------------
-  // Auth handlers
-  // ---------------------------------------------------------------------------
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoginError('');
+  const handleLogin = async ({ email, password }) => {
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+        body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
       if (res.ok) {
         setToken(data.access_token);
         setUserRole(data.role);
+        setUserEmail(email);
         localStorage.setItem('token', data.access_token);
         localStorage.setItem('userRole', data.role);
-        alert('Login success! Dashboard loading...');
+        navigate('/dashboard');
       } else {
-        setLoginError(data.error || 'Login failed');
-        alert(`Login Failed: ${data.error}`);
+        alert(data.error || 'Login failed');
       }
     } catch {
-      setLoginError('Connection refused');
-      alert('Login Connection Refused');
+      alert('Connection refused');
     }
   };
 
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    setLoginError('');
+  const handleRegister = async ({ name, email, password, role }) => {
     try {
       const res = await fetch(`${API_BASE}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: registerName, email: loginEmail,
-          password: loginPassword, role: registerRole,
-        }),
+        body: JSON.stringify({ name, email, password, role }),
       });
-      const data = await res.json();
       if (res.ok) {
-        await handleLogin(e);
+        await handleLogin({ email, password });
       } else {
-        setLoginError(data.error || 'Registration failed');
+        const data = await res.json();
+        alert(data.error || 'Registration failed');
       }
     } catch {
-      setLoginError('Connection refused');
+      alert('Connection refused');
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // Alert tone
-  // ---------------------------------------------------------------------------
-  const playAlertTone = () => {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      [880, 660].forEach((freq, i) => {
-        const osc  = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = freq;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.4, ctx.currentTime + i * 0.25);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.25 + 0.2);
-        osc.start(ctx.currentTime + i * 0.25);
-        osc.stop(ctx.currentTime + i * 0.25 + 0.25);
-      });
-    } catch (err) {
-      console.warn('Audio alert failed:', err);
-    }
+  const handleLogout = () => {
+    setToken(null);
+    setUserRole(null);
+    localStorage.removeItem('token');
+    localStorage.removeItem('userRole');
+    navigate('/');
   };
 
-  // ---------------------------------------------------------------------------
-  // Data fetching
-  // ---------------------------------------------------------------------------
   const fetchAll = useCallback(async () => {
+    if (!activeIncident) return;
     try {
       setLoading(true);
       const severityParam = filterSeverity !== null ? `&severity=${filterSeverity}` : '';
-      const [vRes, mapVRes, cRes, hRes, aRes, incRes] = await Promise.all([
-        apiFetch(`${API_BASE}/victims?page=${currentPage}&limit=${victimsMeta.limit}${severityParam}&incident_id=${activeIncident}`),
+      const [vRes, mapVRes, cRes, hRes, aRes] = await Promise.all([
+        apiFetch(`${API_BASE}/victims?page=1&limit=${victimsMeta.limit}${severityParam}&incident_id=${activeIncident}`),
         apiFetch(`${API_BASE}/victims?limit=200&incident_id=${activeIncident}`),
         apiFetch(`${API_BASE}/clusters?incident_id=${activeIncident}`),
         apiFetch(`${API_BASE}/hospitals`),
         apiFetch(`${API_BASE}/ambulances`),
-        apiFetch(`${API_BASE}/incidents`),
       ]);
-      if (vRes.ok && mapVRes.ok && cRes.ok && hRes.ok && aRes.ok && incRes.ok) {
-        const [vData, mapVData, cData, hData, aData, incData] = await Promise.all([
-          vRes.json(), mapVRes.json(), cRes.json(),
-          hRes.json(), aRes.json(), incRes.json(),
+      if (vRes.ok && mapVRes.ok && cRes.ok && hRes.ok && aRes.ok) {
+        const [vData, mapVData, cData, hData, aData] = await Promise.all([
+          vRes.json(), mapVRes.json(), cRes.json(), hRes.json(), aRes.json(),
         ]);
         setVictims(vData.victims.map(v => ({ ...v, severity: v.triage_level })));
         setVictimsMeta({ total: vData.total, page: vData.page, pages: vData.pages, limit: vData.limit });
@@ -169,18 +141,24 @@ export default function App() {
         setClusters(cData);
         setHospitals(hData);
         setAmbulances(aData);
-        setIncidents(incData);
       }
     } catch (error) {
       console.error('Fetch all failed:', error);
     } finally {
       setLoading(false);
     }
-  }, [activeIncident, currentPage, filterSeverity, victimsMeta.limit, apiFetch]);
+  }, [activeIncident, filterSeverity, victimsMeta.limit, apiFetch]);
 
-  // ---------------------------------------------------------------------------
-  // WebSocket real-time push
-  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!token) return;
+    apiFetch(`${API_BASE}/incidents`)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        setIncidents(data);
+        if (data && data.length > 0 && !activeIncident) setActiveIncident(data[0].id);
+      });
+  }, [token, apiFetch]);
+
   useEffect(() => {
     if (!token || !activeIncident) return;
     fetchAll();
@@ -190,35 +168,18 @@ export default function App() {
     socket.on('victim_ingested', (victim) => {
       if (victim.incident_id !== activeIncident) return;
       const enriched = { ...victim, severity: victim.triage_level };
-      const matchesSeverity = filterSeverity === null || enriched.triage_level === parseInt(filterSeverity);
-      if (matchesSeverity) {
+      if (filterSeverity === null || enriched.triage_level === parseInt(filterSeverity)) {
         setVictims(prev => [enriched, ...prev].slice(0, victimsMeta.limit));
-        setVictimsMeta(prev => ({ ...prev, total: prev.total + 1 }));
       }
       setMapVictims(prev => [enriched, ...prev].slice(0, 200));
-      if (!muted) playAlertTone();
-      if (victim.triage_level === 3 && 'Notification' in window && Notification.permission === 'granted') {
-        new Notification('🚨 CRITICAL VICTIM ARRIVING', {
-          body: `Victim ${victim.id} — assigned to ${victim.hospital_assigned || 'unassigned'}`,
-          icon: '/vite.svg', tag: victim.id, requireInteraction: true,
-        });
-      }
     });
 
     socket.on('victim_assigned', ({ victim_id }) => {
       setVictims(prev => prev.map(v => v.id === victim_id ? { ...v, status: 'assigned' } : v));
-      setMapVictims(prev => prev.map(v => v.id === victim_id ? { ...v, status: 'assigned' } : v));
     });
 
     socket.on('ambulance_updated', ({ amb_id, status, assigned_victim }) => {
       setAmbulances(prev => prev.map(a => a.id === amb_id ? { ...a, status, assigned_victim } : a));
-    });
-
-    socket.on('victim_discharged', ({ victim_id, hospital }) => {
-      setVictims(prev => prev.map(v => v.id === victim_id ? { ...v, status: 'discharged' } : v));
-      if (hospital) {
-        setHospitals(prev => prev.map(h => h.id === hospital.id ? { ...h, available_beds: hospital.available_beds } : h));
-      }
     });
 
     socket.on('hospital_replenished', ({ hospital_id, available_beds }) => {
@@ -226,37 +187,14 @@ export default function App() {
     });
 
     return () => { socket.off(); socket.disconnect(); };
-  }, [muted, activeIncident, token]);
+  }, [token, activeIncident, fetchAll, filterSeverity, victimsMeta.limit]);
 
-  // Fallback 30-second poll
   useEffect(() => {
     if (!token || !activeIncident) return;
     const fallback = setInterval(fetchAll, 30000);
     return () => clearInterval(fallback);
   }, [token, activeIncident, fetchAll]);
 
-  // Fetch incidents on login
-  useEffect(() => {
-    if (!token) return;
-    apiFetch(`${API_BASE}/incidents`)
-      .then(r => r.ok ? r.json() : [])
-      .then(data => {
-        setIncidents(data);
-        if (data && data.length > 0 && !activeIncident) setActiveIncident(data[0].id);
-      })
-      .catch(console.error);
-  }, [token]);
-
-  // Request notification permission
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
-
-  // ---------------------------------------------------------------------------
-  // Action handlers
-  // ---------------------------------------------------------------------------
   const handleAssign = async (victimId) => {
     setVictims(prev => prev.map(v => v.id === victimId ? { ...v, status: 'assigned' } : v));
     const res = await apiFetch(`${API_BASE}/assign/${victimId}`, { method: 'POST' });
@@ -268,7 +206,7 @@ export default function App() {
   };
 
   const handleDischarge = async (victimId, hospitalName) => {
-    const origVictims   = [...victims];
+    const origVictims = [...victims];
     const origHospitals = [...hospitals];
     setVictims(prev => prev.map(v => v.id === victimId ? { ...v, status: 'discharged' } : v));
     if (hospitalName && hospitalName !== 'Waitlisted') {
@@ -319,389 +257,100 @@ export default function App() {
     }
   };
 
-  const clearRoute = () => { setActiveRoute(null); setSelectedAmbulance(null); };
-
-  const fetchQr = async (victimId) => {
-    if (qrData[victimId]) {
-      setQrData(d => { const n = { ...d }; delete n[victimId]; return n; });
-      return;
-    }
-    const res = await apiFetch(`${API_BASE}/victims/${victimId}/qr`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.qr_base64) setQrData(d => ({ ...d, [victimId]: data.qr_base64 }));
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // Routing — victim card deep link
-  // ---------------------------------------------------------------------------
-  const victimMatch = window.location.pathname.match(/^\/victim\/(V-[a-zA-Z0-9]+)$/);
-  if (victimMatch) return <VictimCard victimId={victimMatch[1]} />;
-
-  // ---------------------------------------------------------------------------
-  // Chart data
-  // ---------------------------------------------------------------------------
-  const severityData = [
-    { name: 'Low',      value: victims.filter(v => v.severity === 0).length, color: SEVERITY_COLORS[0] },
-    { name: 'Moderate', value: victims.filter(v => v.severity === 1).length, color: SEVERITY_COLORS[1] },
-    { name: 'High',     value: victims.filter(v => v.severity === 2).length, color: SEVERITY_COLORS[2] },
-    { name: 'Critical', value: victims.filter(v => v.severity === 3).length, color: SEVERITY_COLORS[3] },
-  ];
-
-  // ---------------------------------------------------------------------------
-  // Login / Register screen
-  // ---------------------------------------------------------------------------
-  if (!token) {
-    return (
-      <div className="h-screen w-full bg-slate-950 flex items-center justify-center p-4">
-        <div className="w-full max-w-sm glass-panel p-8 rounded-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500" />
-          <div className="flex flex-col items-center mb-8">
-            <div className="w-16 h-16 rounded-full glass-card flex items-center justify-center mb-4">
-              <Lock className="text-blue-400" size={32} />
-            </div>
-            <h1 className="text-2xl font-black text-slate-100 tracking-wider">SECURE ACCESS</h1>
-            <p className="text-xs text-slate-500 uppercase tracking-widest mt-2">Disaster Triage Network</p>
-          </div>
-
-          <div className="flex bg-slate-900 border border-slate-700/50 rounded-lg p-1 mb-6">
-            <button onClick={() => { setIsRegistering(false); setLoginError(''); }}
-              className={`flex-1 text-[10px] font-bold uppercase tracking-widest py-2 rounded-md transition-all ${!isRegistering ? 'bg-slate-800 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}>
-              Login
-            </button>
-            <button onClick={() => { setIsRegistering(true); setLoginError(''); }}
-              className={`flex-1 text-[10px] font-bold uppercase tracking-widest py-2 rounded-md transition-all ${isRegistering ? 'bg-slate-800 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}>
-              Register
-            </button>
-          </div>
-
-          <form onSubmit={isRegistering ? handleRegister : handleLogin} className="space-y-4">
-            {isRegistering && (
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Full Name</label>
-                <input type="text" value={registerName} onChange={e => setRegisterName(e.target.value)}
-                  className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-colors"
-                  placeholder="John Doe" required />
-              </div>
-            )}
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Email / Responder ID</label>
-              <input type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)}
-                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-colors"
-                placeholder={isRegistering ? 'john@disaster.net' : 'admin@disaster.net'} required />
-            </div>
-            {isRegistering && (
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Role Assignment</label>
-                <select value={registerRole} onChange={e => setRegisterRole(e.target.value)}
-                  className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-colors appearance-none">
-                  <option value="responder">Field Responder</option>
-                  <option value="admin">Command Admin</option>
-                  <option value="victim">Civilian Victim</option>
-                </select>
-              </div>
-            )}
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Passcode</label>
-              <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)}
-                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-colors"
-                placeholder="••••••••" required />
-            </div>
-            {loginError && (
-              <p className="text-red-400 text-[10px] font-bold uppercase tracking-widest text-center py-2">{loginError}</p>
-            )}
-            <button type="submit"
-              className={`w-full text-white font-black py-4 rounded-xl shadow-lg transition-all uppercase tracking-widest mt-4 ${isRegistering ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-500/20' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20'}`}>
-              {isRegistering ? 'Create Clearance' : 'Authenticate & Enter'}
-            </button>
-            {!isRegistering && (
-              <div className="mt-6 text-center">
-                <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">Default Credentials:</p>
-                <p className="text-[10px] text-slate-500 mt-1">Admin: admin@disaster.net / admin123</p>
-              </div>
-            )}
-          </form>
-        </div>
-      </div>
-    );
+  if (!token && location.pathname !== '/victim/:id') {
+    return <LoginPage onLogin={handleLogin} onRegister={handleRegister} isRegistering={false} setIsRegistering={() => {}} />;
   }
 
-  // ---------------------------------------------------------------------------
-  // Main dashboard
-  // ---------------------------------------------------------------------------
   return (
-    <div className="h-screen w-full bg-slate-950 text-slate-200 flex flex-col font-sans overflow-hidden bg-radial-at-tl from-slate-900 via-slate-950 to-slate-950">
-
-      {/* HEADER */}
-      <header className="h-16 glass-panel border-b flex items-center px-8 shrink-0 shadow-2xl z-20 sticky top-0">
-        <AlertTriangle className="text-red-500 mr-3" size={24} />
-        <h1 className="text-xl font-bold tracking-wider text-slate-100 uppercase">Chennai AI Triage Command</h1>
-        <div className="ml-8 border-l border-slate-700 pl-8 flex items-center gap-2">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Active Episode</span>
-          <select value={activeIncident} onChange={e => setActiveIncident(e.target.value)}
-            className="bg-slate-800 border-none text-blue-400 text-xs font-bold rounded px-3 py-1 outline-none ring-1 ring-slate-700">
-            {incidents.map(inc => (
-              <option key={inc.id} value={inc.id}>{inc.name} ({inc.id})</option>
-            ))}
-          </select>
-        </div>
-        <div className="ml-auto flex gap-4">
-          <span className="flex items-center text-sm bg-slate-800 px-3 py-1 rounded-full border border-green-900/50">
-            <Activity size={16} className="mr-2 text-green-400 animate-pulse" />ML ENGINE ACTIVE
-          </span>
-          <button onClick={() => setMuted(!muted)}
-            className={`p-2 rounded-full transition-colors ${muted ? 'bg-red-900/40 text-red-400' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
-            title={muted ? 'Unmute Alerts' : 'Mute Alerts'}>
-            <Activity size={18} className={muted ? 'rotate-45' : ''} />
-          </button>
-        </div>
-      </header>
-
-      <div className="flex-1 flex overflow-hidden">
-
-        {/* LEFT SIDEBAR */}
-        <aside className="w-72 glass-panel border-r p-6 flex flex-col gap-8 shrink-0 z-10 overflow-y-auto custom-scrollbar">
-          {/* Live Status */}
-          <section>
-            <h2 className="text-[10px] uppercase text-slate-500 font-black mb-4 tracking-[0.2em]">Live Status Overview</h2>
-            <div className="grid gap-4">
-              <div className="glass-card p-5 rounded-2xl group cursor-default">
-                <p className="text-4xl font-black text-white group-hover:text-blue-400 transition-colors uppercase tabular-nums">{victims.length}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Total Ingested</p>
-                </div>
-              </div>
-              <div className="glass-card p-5 rounded-2xl border-red-500/20 group cursor-default">
-                <p className="text-4xl font-black text-red-500 group-hover:scale-110 transition-transform origin-left tabular-nums">
-                  {victims.filter(v => v.severity === 3).length}
-                </p>
-                <div className="flex items-center gap-2 mt-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Critical Cases</p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Hospital Load */}
-          <section className="flex-1 overflow-hidden flex flex-col min-h-0">
-            <h2 className="text-[10px] uppercase text-slate-500 font-black mb-4 tracking-[0.2em]">Hospital Load</h2>
-            <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar flex-1">
-              {hospitals.length === 0 ? (
-                [1, 2, 3].map(i => <div key={i} className="h-20 glass-card rounded-xl animate-pulse" />)
-              ) : (
-                hospitals.map(h => (
-                  <div key={h.id} className="glass-card p-4 rounded-xl border-l-4 border-l-blue-500/50">
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="min-w-0">
-                        <p className="text-[11px] font-black text-slate-200 truncate pr-2 uppercase">{h.name}</p>
-                        <p className="text-[9px] text-slate-500 mt-0.5 font-bold uppercase tracking-tight">{h.specialty}</p>
-                      </div>
-                      <span className={`text-[9px] px-2 py-0.5 rounded-full font-black tabular-nums ${h.eta_minutes < 15 ? 'bg-green-500/20 text-green-400' : 'bg-orange-500/20 text-orange-400'}`}>
-                        {h.eta_minutes ? `${h.eta_minutes}m` : '--'}
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-900/50 h-2 rounded-full overflow-hidden border border-slate-700/30">
-                      <div
-                        className={`h-full transition-all duration-1000 ${h.available_beds / h.total_beds < 0.2 ? 'premium-gradient-red' : 'premium-gradient-blue'}`}
-                        style={{ width: `${(h.available_beds / h.total_beds) * 100}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between mt-2 text-[9px] font-black tracking-widest">
-                      <span className="text-slate-500 uppercase">{h.available_beds} FREE</span>
-                      <span className="text-blue-400">{Math.round((h.available_beds / h.total_beds) * 100)}%</span>
-                    </div>
-                    {userRole === 'admin' && h.available_beds === 0 && (
-                      <div className="mt-3 pt-3 border-t border-slate-700/30 flex gap-2">
-                        <input type="number" placeholder="Beds" defaultValue="5"
-                          id={`replenish-input-${h.id}`}
-                          className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] w-16 text-white focus:outline-none focus:border-blue-500" />
-                        <button onClick={() => handleReplenish(h.id, document.getElementById(`replenish-input-${h.id}`).value)}
-                          className="bg-blue-600 hover:bg-blue-500 text-white text-[9px] px-3 py-1 rounded font-black uppercase tracking-tighter transition-all">
-                          Replenish
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-
-          {/* Ambulance Deployment */}
-          <AmbulancePanel
-            ambulances={ambulances}
-            selectedAmbulance={selectedAmbulance}
-            routeLoading={routeLoading}
-            planRoute={planRoute}
-            clearRoute={clearRoute}
+    <Suspense fallback={<LoadingFallback />}>
+      <Routes>
+        <Route path="/" element={token ? <Navigate to="/dashboard" replace /> : <Navigate to="/" replace />} />
+        <Route path="/victim/:id" element={<VictimCardPage />} />
+        <Route path="/dashboard" element={
+          <MainLayout
+            activeIncident={activeIncident}
+            incidents={incidents}
+            onIncidentChange={setActiveIncident}
+            muted={muted}
+            onMuteToggle={() => setMuted(!muted)}
+            userRole={userRole}
+            onLogout={handleLogout}
           />
-        </aside>
-
-        {/* CENTER — Map + Charts */}
-        <main className="flex-1 flex flex-col min-w-0">
-          <div className="flex-1 relative bg-slate-950">
-            <MapView
+        }>
+          <Route index element={
+            <DashboardPage
+              victims={victims}
               mapVictims={mapVictims}
               clusters={clusters}
               hospitals={hospitals}
+              ambulances={ambulances}
+              selectedAmbulance={selectedAmbulance}
+              routeLoading={routeLoading}
+              planRoute={planRoute}
+              clearRoute={() => { setActiveRoute(null); setSelectedAmbulance(null); }}
               activeRoute={activeRoute}
               severityColors={SEVERITY_COLORS}
-              qrData={qrData}
-              fetchQr={fetchQr}
-              handleAssign={handleAssign}
+              filterSeverity={filterSeverity}
+              onFilterSeverity={setFilterSeverity}
+              onAssign={handleAssign}
+              onDischarge={handleDischarge}
+              token={token}
             />
-          </div>
-
-          {/* Charts footer */}
-          <div className="h-60 bg-slate-900 p-4 flex gap-4 border-t border-slate-800 shrink-0">
-            <div className="flex-1 bg-slate-800/30 rounded-lg p-3 border border-slate-700/50 flex flex-col">
-              <h3 className="text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-widest">Triage Distribution</h3>
-              <div className="flex-1 min-h-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={severityData} dataKey="value" cx="50%" cy="50%" innerRadius={35} outerRadius={55} stroke="none" paddingAngle={5}>
-                      {severityData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
-                    </Pie>
-                    <RechartsTooltip contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-            <div className="flex-[2] bg-slate-800/30 rounded-lg p-3 border border-slate-700/50 flex flex-col">
-              <h3 className="text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-widest">Cluster Density</h3>
-              <div className="flex-1 min-h-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={clusters.map(c => ({ name: `Zone ${c.id}`, count: c.count }))}>
-                    <XAxis dataKey="name" stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
-                    <YAxis stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
-                    <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={30} />
-                    <RechartsTooltip cursor={{ fill: 'transparent' }} contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-            <IncidentTimeline victims={victims} colors={SEVERITY_COLORS} />
-          </div>
-        </main>
-
-        {/* RIGHT SIDEBAR — Incident feed */}
-        <aside className="w-80 glass-panel border-l p-6 flex flex-col shrink-0 z-10 overflow-hidden">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[10px] uppercase text-slate-500 font-black tracking-[0.2em]">Incident Response Feed</h2>
-            <Filter size={14} className="text-slate-500" />
-          </div>
-
-          {/* Severity filters */}
-          <div className="flex gap-2 mb-4 overflow-x-auto pb-2 custom-scrollbar shrink-0">
-            {[
-              { label: 'All',      sev: null, active: 'bg-blue-600 shadow-blue-500/20',   inactive: '' },
-              { label: 'Critical', sev: 3,    active: 'bg-red-500 shadow-red-500/20',     inactive: '' },
-              { label: 'High',     sev: 2,    active: 'bg-orange-500 shadow-orange-500/20', inactive: '' },
-              { label: 'Mod',      sev: 1,    active: 'bg-yellow-500 shadow-yellow-500/20', inactive: '' },
-            ].map(({ label, sev, active }) => (
-              <button key={label}
-                onClick={() => { setFilterSeverity(sev); setCurrentPage(1); }}
-                className={`px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-full whitespace-nowrap transition-all shadow-lg ${
-                  filterSeverity === sev ? `${active} text-white` : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                }`}>
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* Victim list */}
-          <div className="flex-1 overflow-y-auto space-y-4 pr-1 custom-scrollbar">
-            {loading ? (
-              [1, 2, 3, 4].map(i => <div key={i} className="h-28 glass-card rounded-2xl animate-pulse" />)
-            ) : (
-              victims
-                .filter(v => v.status !== 'discharged')
-                .sort((a, b) => b.severity - a.severity)
-                .map(v => (
-                  <div key={v.id}
-                    className={`p-4 rounded-2xl glass-card relative overflow-hidden group ${v.severity === 3 ? 'border-red-500/30' : ''} ${v.status === 'assigned' ? 'opacity-75' : ''}`}>
-                    {v.severity === 3 && <div className="absolute top-0 left-0 w-1.5 h-full bg-red-500/80 shadow-[0_0_15px_rgba(239,68,68,0.5)]" />}
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex flex-col">
-                        <span className="font-black text-slate-100 text-xs tabular-nums tracking-wider uppercase">{v.id}</span>
-                        <span className="text-[8px] text-slate-500 font-bold uppercase mt-0.5">Reported Vitals</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {v.status === 'assigned' && (
-                          <span className="text-[8px] px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded-md font-bold uppercase">Dispatched</span>
-                        )}
-                        <button onClick={() => fetchQr(v.id)} className="p-1 px-1.5 bg-slate-800 rounded hover:bg-slate-700 text-slate-300 transition-colors" title="Mobile Triage Card">
-                          <QrCode size={12} />
-                        </button>
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${v.severity === 3 ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-slate-700 text-slate-300'}`}>
-                          {v.severity === 3 ? 'Critical' : v.severity === 2 ? 'High' : 'Stable'}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 mb-4 text-[10px] tabular-nums font-bold">
-                      <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/20">
-                        <p className="text-slate-500 text-[8px] uppercase mb-0.5 tracking-tighter">Heart Rate</p>
-                        <p className="text-blue-400">{v.heart_rate} <span className="text-slate-600 text-[8px]">BPM</span></p>
-                      </div>
-                      <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/20">
-                        <p className="text-slate-500 text-[8px] uppercase mb-0.5 tracking-tighter">Oxygen</p>
-                        <p className={v.spo2 < 90 ? 'text-red-400' : 'text-green-400'}>{v.spo2}<span className="text-[8px]">%</span></p>
-                      </div>
-                    </div>
-                    {qrData[v.id] && (
-                      <div className="bg-slate-800 rounded-xl p-2 flex flex-col items-center gap-1 mt-2 mb-3">
-                        <img src={`data:image/png;base64,${qrData[v.id]}`} className="w-28 h-28 shrink-0 relative z-10" alt="Victim QR Code" />
-                        <p className="text-slate-500 text-[10px]">Scan to open on mobile</p>
-                        <input readOnly value={`http://localhost:5173/victim/${v.id}`}
-                          className="text-[10px] bg-slate-700 text-slate-400 rounded px-2 py-1 w-full text-center outline-none selection:bg-blue-500/30"
-                          onClick={e => e.target.select()} />
-                      </div>
-                    )}
-                    {v.status === 'assigned' ? (
-                      <button onClick={() => handleDischarge(v.id, v.hospital_assigned)}
-                        className="w-full glass-card bg-slate-700 hover:bg-slate-600 text-white py-2.5 rounded-xl text-[10px] font-black tracking-[0.1em] flex items-center justify-center transition-all relative z-10">
-                        <Activity size={12} className="mr-2" /> DISCHARGE PATIENT
-                      </button>
-                    ) : (
-                      <button onClick={() => handleAssign(v.id)}
-                        className="w-full glass-card bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-[10px] font-black tracking-[0.1em] flex items-center justify-center transition-all group-hover:shadow-lg group-hover:shadow-blue-500/20">
-                        <MapPin size={12} className="mr-2" /> DISPATCH MISSION
-                      </button>
-                    )}
-                  </div>
-                ))
-            )}
-            {!loading && victims.filter(v => v.status !== 'discharged').length === 0 && (
-              <div className="text-center py-20 flex flex-col items-center">
-                <div className="w-12 h-12 bg-slate-800 rounded-full flex items-center justify-center mb-4">
-                  <Activity size={24} className="text-slate-700" />
-                </div>
-                <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest">No Active Emergencies</p>
-              </div>
-            )}
-          </div>
-
-          {/* Pagination */}
-          <div className="mt-4 pt-4 border-t border-slate-800/50 flex justify-between items-center shrink-0">
-            <button onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              disabled={currentPage === 1 || loading}
-              className="p-1.5 bg-slate-800 rounded text-slate-300 disabled:opacity-50 hover:bg-slate-700 transition-colors">
-              <ChevronLeft size={16} />
-            </button>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Pg {currentPage} OF {Math.max(1, victimsMeta.pages)} <span className="text-slate-600 mx-1">|</span> {victimsMeta.total} TOTAL
-            </span>
-            <button onClick={() => setCurrentPage(prev => Math.min(victimsMeta.pages, prev + 1))}
-              disabled={currentPage >= victimsMeta.pages || loading}
-              className="p-1.5 bg-slate-800 rounded text-slate-300 disabled:opacity-50 hover:bg-slate-700 transition-colors">
-              <ChevronRight size={16} />
-            </button>
-          </div>
-        </aside>
-      </div>
-    </div>
+          } />
+          <Route path="victims" element={
+            <VictimsPage 
+              token={token}
+              activeIncident={activeIncident}
+              onAssign={handleAssign}
+              onDischarge={handleDischarge}
+            />
+          } />
+          <Route path="hospitals" element={
+            <HospitalsPage 
+              token={token}
+              onReplenish={handleReplenish}
+              userRole={userRole}
+            />
+          } />
+          <Route path="ambulances" element={
+            <AmbulancesPage 
+              token={token}
+              onRoutePlan={planRoute}
+              activeIncident={activeIncident}
+            />
+          } />
+          <Route path="incidents" element={
+            <IncidentsPage 
+              token={token}
+              activeIncident={activeIncident}
+              onIncidentChange={setActiveIncident}
+              userRole={userRole}
+            />
+          } />
+          <Route path="settings" element={
+            <SettingsPage
+              token={token}
+              notificationsEnabled={notificationsEnabled}
+              onNotificationsToggle={() => setNotificationsEnabled(!notificationsEnabled)}
+              soundAlertsEnabled={soundAlertsEnabled}
+              onSoundAlertsToggle={() => setSoundAlertsEnabled(!soundAlertsEnabled)}
+              userRole={userRole}
+              userEmail={userEmail}
+              onLogout={handleLogout}
+            />
+          } />
+        </Route>
+      </Routes>
+    </Suspense>
   );
 }
+
+export default function AppWrapper() {
+  return (
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  );
+}
+
+export { App };
