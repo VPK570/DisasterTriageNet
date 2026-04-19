@@ -46,4 +46,4 @@ graphify-out/
 .graphify_*.json
 .graphify_*.txt
 .opencode/plugins/
-opencode.json
+opencode.json.worktrees/
