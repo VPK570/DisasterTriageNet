@@ -36,7 +36,8 @@ Thumbs.db
 .benchmarks/
 
 # ML model artifacts
-*_model.txt
+# *_model.txt  # commented to allow triage_model.txt
+!triage_model.txt
 
 # Auto-generated context
 CONTEXT.md
