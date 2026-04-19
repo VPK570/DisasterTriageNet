@@ -15,6 +15,7 @@ const HospitalsPage = lazy(() => import('./pages/dashboard/Hospitals'));
 const AmbulancesPage = lazy(() => import('./pages/dashboard/Ambulances'));
 const IncidentsPage = lazy(() => import('./pages/dashboard/Incidents'));
 const SettingsPage = lazy(() => import('./pages/dashboard/Settings'));
+const SimulatePage = lazy(() => import('./pages/dashboard/Simulate'));
 
 function LoadingFallback() {
   return (
@@ -339,6 +340,7 @@ function App() {
               onLogout={handleLogout}
             />
           } />
+          <Route path="simulate" element={<SimulatePage />} />
         </Route>
       </Routes>
     </Suspense>

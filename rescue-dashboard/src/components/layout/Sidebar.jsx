@@ -9,6 +9,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  Play,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { to: '/dashboard/hospitals', icon: Building2, label: 'Hospitals' },
   { to: '/dashboard/ambulances', icon: Truck, label: 'Ambulances' },
   { to: '/dashboard/incidents', icon: AlertTriangle, label: 'Incidents' },
+  { to: '/dashboard/simulate', icon: Play, label: 'Simulate' },
 ];
 
 export default function Sidebar({ collapsed, onToggle }) {
